@@ -28,12 +28,12 @@ import (
 type kevlarChainCode struct {
 }
 
-func (t *kevlarChainCode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *kevlarChainCode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	return nil, nil
 }
 
 //ProofChainCode.Invoke runs a transaction against the current state
-func (t *kevlarChainCode) Invoke(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 
 	//Proofs Chaincode should have one transaction argument. This is body of serialized protobuf
 	if len(args) == 0 {
@@ -318,7 +318,7 @@ func (t *kevlarChainCode) Invoke(stub *shim.ChaincodeStub, function string, args
 }
 
 // Query callback representing the query of a chaincode
-func (t *kevlarChainCode) Query(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *kevlarChainCode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 
 	fmt.Printf("function: %s", function)
 	switch function {
