@@ -15,9 +15,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/hyperledger/fabric/core/chaincode/shim"
+	pb "github.com/hyperledger/fabric/protos/peer"
+
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/golang/protobuf/proto"
-	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/skuchain/kevlar/ProofElements"
 	"github.com/skuchain/kevlar/ProofTx"
 )
@@ -28,8 +30,9 @@ import (
 type kevlarChainCode struct {
 }
 
-func (t *kevlarChainCode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	return nil, nil
+
+func (t *kevlarChainCode) Init(stub shim.ChaincodeStubInterface) pb.Response {
+	return shim.Success(nil)
 }
 
 //ProofChainCode.Invoke runs a transaction against the current state
