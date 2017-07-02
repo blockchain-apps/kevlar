@@ -23,11 +23,11 @@ package main
 //hard-coding.
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
+	pb "github.com/hyperledger/fabric/protos/peer"
 )
 
 // EventSender example simple Chaincode implementation
@@ -35,20 +35,20 @@ type EventSender struct {
 }
 
 // Init function
-func (t *EventSender) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+func (t *EventSender) Init(stub shim.ChaincodeStubInterface) pb.Response {
 	err := stub.PutState("noevents", []byte("0"))
 	if err != nil {
-		return nil, err
+		return shim.Error(err.Error())
 	}
 
-	return nil, nil
+	return shim.Success(nil)
 }
 
 // Invoke function
-func (t *EventSender) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+func (t *EventSender) invoke(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	b, err := stub.GetState("noevents")
 	if err != nil {
-		return nil, errors.New("Failed to get state")
+		return shim.Error("Failed to get state")
 	}
 	noevts, _ := strconv.Atoi(string(b))
 
@@ -59,24 +59,35 @@ func (t *EventSender) Invoke(stub shim.ChaincodeStubInterface, function string, 
 
 	err = stub.PutState("noevents", []byte(strconv.Itoa(noevts+1)))
 	if err != nil {
-		return nil, err
+		return shim.Error(err.Error())
 	}
 
 	err = stub.SetEvent("evtsender", []byte(tosend))
 	if err != nil {
-		return nil, err
+		return shim.Error(err.Error())
 	}
-	return nil, nil
+	return shim.Success(nil)
 }
 
 // Query function
-func (t *EventSender) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+func (t *EventSender) query(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 	b, err := stub.GetState("noevents")
 	if err != nil {
-		return nil, errors.New("Failed to get state")
+		return shim.Error("Failed to get state")
 	}
 	jsonResp := "{\"NoEvents\":\"" + string(b) + "\"}"
-	return []byte(jsonResp), nil
+	return shim.Success([]byte(jsonResp))
+}
+
+func (t *EventSender) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
+	function, args := stub.GetFunctionAndParameters()
+	if function == "invoke" {
+		return t.invoke(stub, args)
+	} else if function == "query" {
+		return t.query(stub, args)
+	}
+
+	return shim.Error("Invalid invoke function name. Expecting \"invoke\" \"query\"")
 }
 
 func main() {

@@ -1,4 +1,9 @@
-from hyperledger/fabric-baseimage
+# FIXME: someone from the UTXO team will need to verify or rework this
+# Copyright London Stock Exchange Group All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+FROM ubuntu:latest
 
 RUN apt-get update && apt-get install pkg-config autoconf libtool -y
 RUN cd /tmp && git clone https://github.com/bitcoin/secp256k1.git && cd secp256k1/

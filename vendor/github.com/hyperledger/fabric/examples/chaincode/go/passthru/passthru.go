@@ -17,12 +17,12 @@ limitations under the License.
 package main
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
-	"github.com/hyperledger/fabric/core/util"
+	pb "github.com/hyperledger/fabric/protos/peer"
 )
 
 // PassthruChaincode passes thru invoke and query to another chaincode where
@@ -33,35 +33,28 @@ type PassthruChaincode struct {
 }
 
 //Init func will return error if function has string "error" anywhere
-func (p *PassthruChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-
+func (p *PassthruChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response {
+	function, _ := stub.GetFunctionAndParameters()
 	if strings.Index(function, "error") >= 0 {
-		return nil, errors.New(function)
+		return shim.Error(function)
 	}
-	return []byte(function), nil
+	return shim.Success([]byte(function))
 }
 
 //helper
-func (p *PassthruChaincode) iq(invoke bool, stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+func (p *PassthruChaincode) iq(stub shim.ChaincodeStubInterface, function string, args []string) pb.Response {
 	if function == "" {
-		return nil, errors.New("Chaincode ID not provided")
+		return shim.Error("Chaincode ID not provided")
 	}
 	chaincodeID := function
 
-	if invoke {
-		return stub.InvokeChaincode(chaincodeID, util.ToChaincodeArgs(args...))
-	}
-	return stub.QueryChaincode(chaincodeID, util.ToChaincodeArgs(args...))
+	return stub.InvokeChaincode(chaincodeID, util.ToChaincodeArgs(args...), "")
 }
 
 // Invoke passes through the invoke call
-func (p *PassthruChaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	return p.iq(true, stub, function, args)
-}
-
-// Query passes through the query call
-func (p *PassthruChaincode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	return p.iq(false, stub, function, args)
+func (p *PassthruChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
+	function, args := stub.GetFunctionAndParameters()
+	return p.iq(stub, function, args)
 }
 
 func main() {

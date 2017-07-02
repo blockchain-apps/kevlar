@@ -22,10 +22,10 @@ import (
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 )
 
-func checkInit(t *testing.T, scc *SimpleChaincode, stub *shim.MockStub, args []string) {
-	_, err := stub.MockInit("1", "init", args)
-	if err != nil {
-		fmt.Println("Init failed", err)
+func checkInit(t *testing.T, scc *SimpleChaincode, stub *shim.MockStub, args [][]byte) {
+	res := stub.MockInit("1", args)
+	if res.Status != shim.OK {
+		fmt.Println("Init failed", res.Message)
 		t.FailNow()
 	}
 }
@@ -42,29 +42,10 @@ func checkState(t *testing.T, stub *shim.MockStub, name string, value string) {
 	}
 }
 
-func checkQuery(t *testing.T, scc *SimpleChaincode, stub *shim.MockStub, args []string, value string) {
-	bytes, err := scc.Query(stub, "query", args)
-	if err != nil {
-		// expected failure
-		fmt.Println("Query below is expected to fail")
-		fmt.Println("Query failed", err)
-		fmt.Println("Query above is expected to fail")
-
-		if err.Error() != "{\"Error\":\"Cannot put state within chaincode query\"}" {
-			fmt.Println("Failure was not the expected \"Cannot put state within chaincode query\" : ", err)
-			t.FailNow()
-		}
-
-	} else {
-		fmt.Println("Query did not fail as expected (PutState within Query)!", bytes, err)
-		t.FailNow()
-	}
-}
-
-func checkInvoke(t *testing.T, scc *SimpleChaincode, stub *shim.MockStub, args []string) {
-	_, err := stub.MockInvoke("1", "query", args)
-	if err != nil {
-		fmt.Println("Invoke", args, "failed", err)
+func checkInvoke(t *testing.T, scc *SimpleChaincode, stub *shim.MockStub, args [][]byte) {
+	res := stub.MockInvoke("1", args)
+	if res.Status != shim.OK {
+		fmt.Println("Query failed", string(res.Message))
 		t.FailNow()
 	}
 }
@@ -74,22 +55,18 @@ func TestExample03_Init(t *testing.T) {
 	stub := shim.NewMockStub("ex03", scc)
 
 	// Init A=123 B=234
-	checkInit(t, scc, stub, []string{"A", "123"})
+	checkInit(t, scc, stub, [][]byte{[]byte("init"), []byte("A"), []byte("123")})
 
 	checkState(t, stub, "A", "123")
 }
 
-func TestExample03_Query(t *testing.T) {
+func TestExample03_Invoke(t *testing.T) {
 	scc := new(SimpleChaincode)
 	stub := shim.NewMockStub("ex03", scc)
 
 	// Init A=345 B=456
-	checkInit(t, scc, stub, []string{"A", "345"})
+	checkInit(t, scc, stub, [][]byte{[]byte("init"), []byte("A"), []byte("345")})
 
-	// Query A
-	checkQuery(t, scc, stub, []string{"A", "345"}, "345")
-}
-
-func TestExample03_Invoke(t *testing.T) {
-	// Example03 does not implement Invoke()
+	// Invoke "query"
+	checkInvoke(t, scc, stub, [][]byte{[]byte("query"), []byte("A"), []byte("345")})
 }

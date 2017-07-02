@@ -19,29 +19,28 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
-	"github.com/op/go-logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	_ "net/http/pprof"
 
-	"github.com/hyperledger/fabric/core"
-	"github.com/hyperledger/fabric/core/crypto"
-	"github.com/hyperledger/fabric/flogging"
+	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/core/config"
 	"github.com/hyperledger/fabric/peer/chaincode"
-	"github.com/hyperledger/fabric/peer/network"
+	"github.com/hyperledger/fabric/peer/channel"
+	"github.com/hyperledger/fabric/peer/clilogging"
+	"github.com/hyperledger/fabric/peer/common"
 	"github.com/hyperledger/fabric/peer/node"
 	"github.com/hyperledger/fabric/peer/version"
 )
 
-var logger = logging.MustGetLogger("main")
+var logger = flogging.MustGetLogger("main")
+var logOutput = os.Stderr
 
 // Constants go here.
-const fabric = "hyperledger"
 const cmdRoot = "core"
 
 // The main command describes the service and
@@ -49,14 +48,21 @@ const cmdRoot = "core"
 var mainCmd = &cobra.Command{
 	Use: "peer",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		peerCommand := getPeerCommandFromCobraCommand(cmd)
-		flogging.LoggingInit(peerCommand)
+		// check for CORE_LOGGING_LEVEL environment variable, which should override
+		// all other log settings
+		loggingSpec := viper.GetString("logging_level")
 
-		return core.CacheConfiguration()
+		if loggingSpec == "" {
+			// if CORE_LOGGING_LEVEL not set, use the value for 'peer' from core.yaml
+			loggingSpec = viper.GetString("logging.peer")
+		}
+		flogging.InitFromSpec(loggingSpec)
+
+		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if versionFlag {
-			version.Print()
+			fmt.Print(version.GetInfo())
 		} else {
 			cmd.HelpFunc()(cmd, args)
 		}
@@ -83,76 +89,34 @@ func main() {
 	testCoverProfile := ""
 	mainFlags.StringVarP(&testCoverProfile, "test.coverprofile", "", "coverage.cov", "Done")
 
-	var alternativeCfgPath = os.Getenv("PEER_CFG_PATH")
-	if alternativeCfgPath != "" {
-		logger.Infof("User defined config file path: %s", alternativeCfgPath)
-		viper.AddConfigPath(alternativeCfgPath) // Path to look for the config file in
-	} else {
-		viper.AddConfigPath("./") // Path to look for the config file in
-		// Path to look for the config file in based on GOPATH
-		gopath := os.Getenv("GOPATH")
-		for _, p := range filepath.SplitList(gopath) {
-			peerpath := filepath.Join(p, "src/github.com/hyperledger/fabric/peer")
-			viper.AddConfigPath(peerpath)
-		}
-	}
-
-	// Now set the configuration file.
-	viper.SetConfigName(cmdRoot) // Name of config file (without extension)
-
-	err := viper.ReadInConfig() // Find and read the config file
-	if err != nil {             // Handle errors reading the config file
-		panic(fmt.Errorf("Fatal error when reading %s config file: %s\n", cmdRoot, err))
+	err := common.InitConfig(cmdRoot)
+	if err != nil { // Handle errors reading the config file
+		panic(fmt.Errorf("Fatal error when initializing %s config : %s\n", cmdRoot, err))
 	}
 
 	mainCmd.AddCommand(version.Cmd())
 	mainCmd.AddCommand(node.Cmd())
-	mainCmd.AddCommand(network.Cmd())
-	mainCmd.AddCommand(chaincode.Cmd())
+	mainCmd.AddCommand(chaincode.Cmd(nil))
+	mainCmd.AddCommand(clilogging.Cmd(nil))
+	mainCmd.AddCommand(channel.Cmd(nil))
 
 	runtime.GOMAXPROCS(viper.GetInt("peer.gomaxprocs"))
 
-	// Init the crypto layer
-	if err := crypto.Init(); err != nil {
-		panic(fmt.Errorf("Failed to initialize the crypto layer: %s", err))
-	}
+	// setup system-wide logging backend based on settings from core.yaml
+	flogging.InitBackend(flogging.SetFormat(viper.GetString("logging.format")), logOutput)
 
+	// Init the MSP
+	var mspMgrConfigDir = config.GetPath("peer.mspConfigPath")
+	var mspID = viper.GetString("peer.localMspId")
+	err = common.InitCrypto(mspMgrConfigDir, mspID)
+	if err != nil { // Handle errors reading the config file
+		logger.Errorf("Cannot run peer because %s", err.Error())
+		os.Exit(1)
+	}
 	// On failure Cobra prints the usage message and error string, so we only
 	// need to exit with a non-0 status
 	if mainCmd.Execute() != nil {
 		os.Exit(1)
 	}
 	logger.Info("Exiting.....")
-}
-
-// getPeerCommandFromCobraCommand retreives the peer command from the cobra command struct.
-// i.e. for a command of `peer node start`, this should return "node"
-// For the main/root command this will return the root name (i.e. peer)
-// For invalid commands (i.e. nil commands) this will return an empty string
-func getPeerCommandFromCobraCommand(command *cobra.Command) string {
-	var commandName string
-
-	if command == nil {
-		return commandName
-	}
-
-	if peerCommand, ok := findChildOfRootCommand(command); ok {
-		commandName = peerCommand.Name()
-	} else {
-		commandName = command.Name()
-	}
-
-	return commandName
-}
-
-func findChildOfRootCommand(command *cobra.Command) (*cobra.Command, bool) {
-	for command.HasParent() {
-		if !command.Parent().HasParent() {
-			return command, true
-		}
-
-		command = command.Parent()
-	}
-
-	return nil, false
 }
