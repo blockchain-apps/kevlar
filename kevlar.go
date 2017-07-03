@@ -12,7 +12,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
@@ -30,30 +29,31 @@ import (
 type kevlarChainCode struct {
 }
 
-
 func (t *kevlarChainCode) Init(stub shim.ChaincodeStubInterface) pb.Response {
 	return shim.Success(nil)
 }
 
 //ProofChainCode.Invoke runs a transaction against the current state
-func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
+
+	function, args := stub.GetFunctionAndParameters()
 
 	//Proofs Chaincode should have one transaction argument. This is body of serialized protobuf
 	if len(args) == 0 {
 		fmt.Println("Zero arguments found")
-		return nil, errors.New("Zero arguments found")
+		return shim.Error("Zero arguments found")
 	}
 
 	argsBytes, err := hex.DecodeString(args[0])
 	if err != nil {
 		fmt.Println("Invalid argument expected hex")
-		return nil, errors.New("Invalid argument expected hex")
+		return shim.Error("Invalid argument expected hex")
 	}
 	argsProof := proofTx.ProofTX{}
 	err = proto.Unmarshal(argsBytes, &argsProof)
 	if err != nil {
 		fmt.Println("Invalid argument expected protocol buffer")
-		return nil, errors.New("Invalid argument expected protocol buffer")
+		return shim.Error("Invalid argument expected protocol buffer")
 	}
 	fmt.Println(function)
 	fmt.Println(argsProof)
@@ -67,11 +67,11 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 		nameCheckBytes, err := stub.GetState("Proof:" + name)
 		if len(nameCheckBytes) != 0 {
 			fmt.Printf("Proof Name:%s already claimed\n", name)
-			return nil, fmt.Errorf("Proof Name:%s already claimed", name)
+			return shim.Error(fmt.Sprintf("Proof Name:%s already claimed\n", name))
 		}
 		if int(threshold) > len(publicKeys) {
 			fmt.Printf("Invalid Threshold of %d for %d keys\n", threshold, len(publicKeys))
-			return nil, fmt.Errorf("Invalid Threshold of %d for %d keys ", threshold, len(publicKeys))
+			return shim.Error(fmt.Sprintf("Invalid Threshold of %d for %d keys\n", threshold, len(publicKeys)))
 		}
 		switch argsProof.Type {
 		case proofTx.ProofTX_SECP256K1:
@@ -83,7 +83,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 				pubKey, errF := btcec.ParsePubKey(keybytes, btcec.S256())
 				if errF != nil {
 					fmt.Printf("Invalid Public Key: %v\n", keybytes)
-					return nil, fmt.Errorf("Invalid Public Key: %v", keybytes)
+					return shim.Error(fmt.Sprintf("Invalid Public Key: %v", keybytes))
 				}
 				newProof.PublicKeys = append(newProof.PublicKeys, *pubKey)
 			}
@@ -91,7 +91,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			err = stub.PutState("Proof:"+name, bufferData)
 			if err != nil {
 				fmt.Printf("Error Saving Proof to Data %s\n", err)
-				return nil, fmt.Errorf("Error Saving Proof to Data %s", err)
+				return shim.Error(fmt.Sprintf("Error Saving Proof to Data %s", err))
 			}
 		case proofTx.ProofTX_SECP256K1SHA2:
 			fmt.Println("Creating Sha2 Proof")
@@ -104,7 +104,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 				pubKey, errF := btcec.ParsePubKey(keybytes, btcec.S256())
 				if errF != nil {
 					fmt.Printf("Invalid Public Key: %v\n", keybytes)
-					return nil, fmt.Errorf("Invalid Public Key: %v", keybytes)
+					return shim.Error(fmt.Sprintf("Invalid Public Key: %v", keybytes))
 				}
 				newProof.PublicKeys = append(newProof.PublicKeys, *pubKey)
 			}
@@ -112,7 +112,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			for _, digest := range argsProof.Digests {
 				if len(digest) != 32 {
 					fmt.Println("Invalid Digest Length")
-					return nil, fmt.Errorf("Invalid Digest Length")
+					return shim.Error(fmt.Sprintf("Invalid Digest Length"))
 				}
 				var fixedDigest [32]byte
 				copy(fixedDigest[:], digest)
@@ -123,22 +123,22 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			err = stub.PutState("Proof:"+name, bufferData)
 			if err != nil {
 				fmt.Printf("Error Saving Proof to Data %s\n", err)
-				return nil, fmt.Errorf("Error Saving Proof to Data %s", err)
+				return shim.Error(fmt.Sprintf("Error Saving Proof to Data %s", err))
 			}
 		default:
 			fmt.Println("Invalid Proof Type")
-			return nil, errors.New("Invalid Proof Type")
+			return shim.Error("Invalid Proof Type")
 		}
 
 		//Verify that these are publicKeys
 
-		return nil, nil
+		return shim.Success(nil)
 
 	case "signProof":
 		proofBytes, err := stub.GetState("Proof:" + argsProof.Name)
 		if err != nil || len(proofBytes) == 0 {
 			fmt.Printf("Could not retrieve:%s\n", argsProof.Name)
-			return nil, fmt.Errorf("Could not retrieve:%s", argsProof.Name)
+			return shim.Error(fmt.Sprintf("Could not retrieve:%s", argsProof.Name))
 		}
 
 		secpProof := new(ElementProof.SecP256k1ElementProof)
@@ -149,7 +149,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			result := secpProof.Signed(&argsProof.Signatures, argsProof.Data)
 			if result == false {
 				fmt.Println("Invalid Signatures")
-				return nil, errors.New("Invalid Signatures")
+				return shim.Error("Invalid Signatures")
 			}
 			proofBytes = secpProof.ToBytes()
 
@@ -161,24 +161,24 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			result := secpShaProof.Signed(&argsProof.Signatures, argsProof.Data)
 			if result == false {
 				fmt.Println("Invalid Signatures")
-				return nil, errors.New("Invalid Signatures")
+				return shim.Error("Invalid Signatures")
 			}
 			result = secpShaProof.Hash(argsProof.PreImages)
 			if result == false {
 				fmt.Println("Invalid Preimages")
-				return nil, errors.New("Invalid Preimages")
+				return shim.Error("Invalid Preimages")
 			}
 			proofBytes = secpShaProof.ToBytes()
 			stub.PutState("Proof:"+secpShaProof.Name(), proofBytes)
 		}
 
-		return nil, nil
+		return shim.Success(nil)
 
 	case "revokeProof":
 		proofBytes, err := stub.GetState("Proof:" + argsProof.Name)
 		if err != nil || len(proofBytes) == 0 {
 			fmt.Printf("Could not retrieve:%s\n", argsProof.Name)
-			return nil, fmt.Errorf("Could not retrieve:%s", argsProof.Name)
+			return shim.Error(fmt.Sprintf("Could not retrieve:%s", argsProof.Name))
 		}
 
 		secpProof := new(ElementProof.SecP256k1ElementProof)
@@ -188,7 +188,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 		if err == nil {
 			result := secpProof.Revoked(&argsProof.Signatures)
 			if result == false {
-				return nil, errors.New("Invalid Signatures")
+				return shim.Error("Invalid Signatures")
 			}
 			proofBytes = secpProof.ToBytes()
 
@@ -200,25 +200,25 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			result := secpShaProof.Revoked(&argsProof.Signatures)
 			if result == false {
 				fmt.Println("Invalid Signatures")
-				return nil, errors.New("Invalid Signatures")
+				return shim.Error("Invalid Signatures")
 			}
 			proofBytes = secpShaProof.ToBytes()
 			stub.PutState("Proof:"+secpShaProof.Name(), proofBytes)
 		}
-		return nil, nil
+		return shim.Success(nil)
 
 	case "supercedeProof":
 
 		proofBytes, err := stub.GetState("Proof:" + argsProof.Name)
 		if err != nil || len(proofBytes) == 0 {
 			fmt.Printf("Could not retrieve:%s\n", argsProof.Name)
-			return nil, fmt.Errorf("Could not retrieve:%s", argsProof.Name)
+			return shim.Error(fmt.Sprintf("Could not retrieve:%s", argsProof.Name))
 		}
 
 		nameCheck, err := stub.GetState("Proof:" + argsProof.Supercede.Name)
 		if len(nameCheck) > 0 {
 			fmt.Printf("Invalid Superceding Name:%s\n", argsProof.Supercede.Name)
-			return nil, fmt.Errorf("Invalid Superceding Name:%s", argsProof.Supercede.Name)
+			return shim.Error(fmt.Sprintf("Invalid Superceding Name:%s", argsProof.Supercede.Name))
 		}
 		secpProof := new(ElementProof.SecP256k1ElementProof)
 		secpShaProof := new(ElementProof.SecP256k1SHA2ElementProof)
@@ -232,7 +232,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 
 		if int(threshold) > len(publicKeys) {
 			fmt.Printf("Invalid Threshold of %d for %d keys\n", threshold, len(publicKeys))
-			return nil, fmt.Errorf("Invalid Threshold of %d for %d keys ", threshold, len(publicKeys))
+			return shim.Error(fmt.Sprintf("Invalid Threshold of %d for %d keys ", threshold, len(publicKeys)))
 		}
 
 		var bufferData []byte
@@ -246,7 +246,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 				pubKey, errF := btcec.ParsePubKey(keybytes, btcec.S256())
 				if errF != nil {
 					fmt.Printf("Invalid Public Key: %v\n", keybytes)
-					return nil, fmt.Errorf("Invalid Public Key: %v", keybytes)
+					return shim.Error(fmt.Sprintf("Invalid Public Key: %v", keybytes))
 				}
 				newProof.PublicKeys = append(newProof.PublicKeys, *pubKey)
 			}
@@ -262,7 +262,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 				pubKey, errF := btcec.ParsePubKey(keybytes, btcec.S256())
 				if errF != nil {
 					fmt.Printf("Invalid Public Key: %v\n", keybytes)
-					return nil, fmt.Errorf("Invalid Public Key: %v", keybytes)
+					return shim.Error(fmt.Sprintf("Invalid Public Key: %v", keybytes))
 				}
 				newProof.PublicKeys = append(newProof.PublicKeys, *pubKey)
 			}
@@ -270,7 +270,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			for _, digest := range argsProof.Supercede.Digests {
 				if len(digest) != 32 {
 					fmt.Println("Invalid Digest Length")
-					return nil, fmt.Errorf("Invalid Digest Length")
+					return shim.Error(fmt.Sprintf("Invalid Digest Length"))
 				}
 				var fixedDigest [32]byte
 				copy(fixedDigest[:], digest)
@@ -281,7 +281,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 
 		default:
 			fmt.Println("Invalid Proof Type")
-			return nil, errors.New("Invalid Proof Type")
+			return shim.Error("Invalid Proof Type")
 		}
 
 		err = secpProof.FromBytes(proofBytes)
@@ -289,7 +289,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			result := secpProof.Supercede(&argsProof.Signatures, digestHex, argsProof.Supercede.Name)
 			if result == false {
 				fmt.Printf("Invalid Signatures. Digest: %s\n", digestHex)
-				return nil, errors.New("Invalid Signatures")
+				return shim.Error("Invalid Signatures")
 			}
 			proofBytes = secpProof.ToBytes()
 
@@ -301,7 +301,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 			result := secpShaProof.Supercede(&argsProof.Signatures, digestHex, argsProof.Supercede.Name)
 			if result == false {
 				fmt.Printf("Invalid Signatures. Digest: %s\n", digestHex)
-				return nil, errors.New("Invalid Signatures")
+				return shim.Error("Invalid Signatures")
 			}
 			proofBytes = secpShaProof.ToBytes()
 			stub.PutState("Proof:"+secpShaProof.Name(), proofBytes)
@@ -310,48 +310,48 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface, function stri
 		err = stub.PutState("Proof:"+name, bufferData)
 		if err != nil {
 			fmt.Printf("Error Saving Proof to Data %s\n", err)
-			return nil, fmt.Errorf("Error Saving Proof to Data %s", err)
+			return shim.Error(fmt.Sprintf("Error Saving Proof to Data %s", err))
 		}
 
-		return nil, nil
+		return shim.Success(nil)
+
+	case "query":
+
+		return t.query(stub, args)
+
 	default:
 		fmt.Println("Invalid function type")
-		return nil, errors.New("Invalid function type")
+		return shim.Error("Received unknown function invocation")
 	}
 }
 
-// Query callback representing the query of a chaincode
-func (t *kevlarChainCode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+//  query of a chaincode
+func (t *kevlarChainCode) query(stub shim.ChaincodeStubInterface, args []string) pb.Response {
 
-	fmt.Printf("function: %s", function)
-	switch function {
-	case "status":
-		if len(args) != 1 {
-			return nil, fmt.Errorf("No argument specified")
-		}
-		name := args[0]
-		proofBytes, err := stub.GetState("Proof:" + name)
-
-		if err != nil || len(proofBytes) == 0 {
-			return nil, fmt.Errorf("%s is not found", name)
-		}
-		secpProof := new(ElementProof.SecP256k1ElementProof)
-		secpShaProof := new(ElementProof.SecP256k1SHA2ElementProof)
-
-		err = secpProof.FromBytes(proofBytes)
-		if err == nil {
-			return secpProof.ToJSON(), nil
-		}
-
-		err = secpShaProof.FromBytes(proofBytes)
-		if err == nil {
-			return secpShaProof.ToJSON(), nil
-		}
-
-		return nil, nil
-	default:
-		return nil, errors.New("Unsupported operation")
+	if len(args) != 1 {
+		return shim.Error(fmt.Sprintf("No argument specified"))
 	}
+	name := args[0]
+	proofBytes, err := stub.GetState("Proof:" + name)
+
+	if err != nil || len(proofBytes) == 0 {
+		return shim.Error(fmt.Sprintf("%s is not found", name))
+	}
+	secpProof := new(ElementProof.SecP256k1ElementProof)
+	secpShaProof := new(ElementProof.SecP256k1SHA2ElementProof)
+
+	err = secpProof.FromBytes(proofBytes)
+	if err == nil {
+		return shim.Success(secpProof.ToJSON())
+	}
+
+	err = secpShaProof.FromBytes(proofBytes)
+	if err == nil {
+		return shim.Success(secpShaProof.ToJSON())
+	}
+
+	return shim.Success(nil)
+
 }
 
 func main() {
