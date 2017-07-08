@@ -38,6 +38,10 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 
 	function, args := stub.GetFunctionAndParameters()
 
+	if function == "query" {
+		return t.query(stub, args)
+	}
+
 	//Proofs Chaincode should have one transaction argument. This is body of serialized protobuf
 	if len(args) == 0 {
 		fmt.Println("Zero arguments found")
@@ -314,10 +318,6 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 		}
 
 		return shim.Success(nil)
-
-	case "query":
-
-		return t.query(stub, args)
 
 	default:
 		fmt.Println("Invalid function type")
