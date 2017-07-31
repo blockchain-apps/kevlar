@@ -1,6 +1,6 @@
-#Kevlar
+# Kevlar
 
-##Introduction
+## Introduction
 Skuchain has developed a protocol for parties to notarize attestations of the state of contracts documents.
 This protocol is notable in several regards
 
