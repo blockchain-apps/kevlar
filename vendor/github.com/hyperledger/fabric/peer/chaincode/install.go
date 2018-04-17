@@ -1,17 +1,7 @@
 /*
 Copyright IBM Corp. 2016-2017 All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-		 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package chaincode
@@ -122,17 +112,14 @@ func getPackageFromFile(ccpackfile string) (proto.Message, *pb.ChaincodeDeployme
 		return nil, nil, err
 	}
 
-	//the bytes should be a valid package (CDS or SigedCDS)
+	//the bytes should be a valid package (CDS or SignedCDS)
 	ccpack, err := ccprovider.GetCCPackage(b)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	//either CDS or Envelope
-	o, err := ccpack.GetPackageObject(), nil
-	if err != nil {
-		return nil, nil, err
-	}
+	o := ccpack.GetPackageObject()
 
 	//try CDS first
 	cds, ok := o.(*pb.ChaincodeDeploymentSpec)

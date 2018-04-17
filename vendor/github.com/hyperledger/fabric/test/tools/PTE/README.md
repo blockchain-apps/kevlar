@@ -52,7 +52,7 @@ To build and test the following prerequisites must be installed first:
     -  node v7 is not currently supported
 - gulp command
     - `npm install -g gulp`
-- go (v1.7 or later)
+- go (v1.9 or later)
     - refer to [Go - Getting Started](https://golang.org/doc/install)
 - others:
     - in Ubuntu: `apt install -y build-essential python libltdl-dev`
@@ -107,7 +107,7 @@ If you do not have access to a Fabric network, please see the section on [Creati
 ### Example
 `./pte_driver.sh userInputs/runCases.txt`
 
-`userInputs/runCases.txt` contains the list of user specified test cases to be executed. Each line is a test case and includes two parameters: **SDK type** and **user input file**.  
+`userInputs/runCases.txt` contains the list of user specified test cases to be executed. Each line is a test case and includes two parameters: **SDK type** and **user input file**.
 
 For instance, a run cases file containing two test cases using the node SDK would be:
 ```
@@ -360,7 +360,7 @@ The output includes network id, thread id, transaction type, total transactions,
             "fcn": "invoke",
             "args": ["put", "a", "string-msg"]
         }
-    },   
+    },
     "SCFile": [
         {"ServiceCredentials":"SCFiles/config-local.json"}
     ]
@@ -429,16 +429,27 @@ where:
 The service credentials contain the information of the network and are stored in the `SCFiles` directory. The following is a sample of the service credentials json file:
 ```
 {
-    "test-network": {
-            "orderer": {
-                    "name": "OrdererMSP",
-                    "mspid": "OrdererMSP",
-                    "mspPath": "./crypto-config",
-                    "adminPath": "./crypto-config/ordererOrganizations/example.com/users/Admin@example.com/msp",
-                    "comName": "example.com",
-                    "url": "grpcs://localhost:5005",
-                    "server-hostname": "orderer0.example.com",
-                    "tls_cacerts": "./crypto-config/ordererOrganizations/example.com/orderers/orderer0.example.com/msp/cacerts/ca.example.com-cert.pem"
+                "orderer": {
+                        "orderer0": {
+                                "name": "OrdererMSP",
+                                "mspid": "OrdererMSP",
+                                "mspPath": "./crypto-config",
+                                "adminPath": "./crypto-config/ordererOrganizations/example.com/users/Admin@example.com/msp",
+                                "comName": "example.com",
+                                "url": "grpcs://localhost:7050",
+                                "server-hostname": "orderer0.example.com",
+                                "tls_cacerts": "./crypto-config/ordererOrganizations/example.com/orderers/orderer0.example.com/msp/cacerts/ca.example.com-cert.pem"
+                        },
+                        "orderer1": {
+                                "name": "OrdererMSP",
+                                "mspid": "OrdererMSP",
+                                "mspPath": "./crypto-config",
+                                "adminPath": "./crypto-config/ordererOrganizations/example.com/users/Admin@example.com/msp",
+                                "comName": "example.com",
+                                "url": "grpcs://localhost:8050",
+                                "server-hostname": "orderer1.example.com",
+                                "tls_cacerts": "./crypto-config/ordererOrganizations/example.com/orderers/orderer1.example.com/msp/cacerts/ca.example.com-cert.pem"
+                        }
             },
             "org1": {
                     "name": "Org1MSP",
@@ -446,6 +457,7 @@ The service credentials contain the information of the network and are stored in
                     "mspPath": "./crypto-config",
                     "adminPath": "./crypto-config/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp",
                     "comName": "example.com",
+                    "ordererID": "orderer0",
                     "ca": {
                          "url":"https://localhost:7054",
                          "name": "ca-org1"
@@ -471,6 +483,7 @@ The service credentials contain the information of the network and are stored in
                     "mspPath": "./crypto-config",
                     "adminPath": "./crypto-config/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp",
                     "comName": "example.com",
+                    "ordererID": "orderer1",
                     "ca": {
                          "url":"https://localhost:8054",
                          "name": "ca-org2"
@@ -494,6 +507,8 @@ The service credentials contain the information of the network and are stored in
 }
 ```
 
+## Sending transactions to multiple orderers
+PTE supports multi orderers by specifying an orderer to each organization using `ordererID` in the Service credentials json file.  Then PTE will direct all transactions target the peers in that organization to the specified orderer.
 
 ## Creating a local Fabric network
 - If you do not yet have the Fabric docker images in your local docker registry, please either build them from Fabric source or download them from dockerhub.

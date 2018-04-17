@@ -1102,7 +1102,7 @@ def create_channel_config_update(system_channel_version, channel_id, consortium_
         Policy(type=typeImplicitMeta, value=IMP(
             rule=ruleMajority, sub_policy=BootstrapHelper.KEY_POLICY_ADMINS).SerializeToString()))
     write_set.groups[ApplicationGroup].mod_policy = "Admins"
-    for k, v in write_set.groups[ApplicationGroup].groups.iteritems():
+    for k, v in write_set.groups[ApplicationGroup].policies.iteritems():
         v.mod_policy=BootstrapHelper.KEY_POLICY_ADMINS
     config_update = common_dot_configtx_pb2.ConfigUpdate(channel_id=channel_id,
                                                          read_set=read_set,
@@ -1232,7 +1232,7 @@ def get_latest_configuration_block(deliverer_stream_helper, channel_id):
         deliverer_stream_helper.seekToRange(chainID=channel_id, start=last_config.index, end=last_config.index)
         blocks = deliverer_stream_helper.getBlocks()
         assert len(blocks) == 1, "Expected single block, received: {0} blocks".format(len(blocks))
-        assert len(blocks[0].data.data) == 1, "Expected single transaction for configuration block, instead found {0} transactions".format(len(block.data.data))
+        assert len(blocks[0].data.data) == 1, "Expected single transaction for configuration block, instead found {0} transactions".format(len(blocks.data.data))
         latest_config_block = blocks[0]
     return latest_config_block
 

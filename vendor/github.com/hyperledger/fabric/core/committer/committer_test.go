@@ -21,11 +21,12 @@ import (
 	"testing"
 
 	"github.com/hyperledger/fabric/common/configtx/test"
-	"github.com/hyperledger/fabric/common/configtx/tool/localconfig"
-	"github.com/hyperledger/fabric/common/configtx/tool/provisional"
 	"github.com/hyperledger/fabric/common/ledger/testutil"
+	"github.com/hyperledger/fabric/common/tools/configtxgen/encoder"
+	"github.com/hyperledger/fabric/common/tools/configtxgen/localconfig"
+	"github.com/hyperledger/fabric/common/util"
+	ledger2 "github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/ledger/ledgermgmt"
-	"github.com/hyperledger/fabric/core/mocks/validator"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +42,7 @@ func TestKVLedgerBlockStorage(t *testing.T) {
 	assert.NoError(t, err, "Error while creating ledger: %s", err)
 	defer ledger.Close()
 
-	committer := NewLedgerCommitter(ledger, &validator.MockValidator{})
+	committer := NewLedgerCommitter(ledger)
 	height, err := committer.LedgerHeight()
 	assert.Equal(t, uint64(1), height)
 	assert.NoError(t, err)
@@ -50,16 +51,20 @@ func TestKVLedgerBlockStorage(t *testing.T) {
 	testutil.AssertEquals(t, bcInfo, &common.BlockchainInfo{
 		Height: 1, CurrentBlockHash: gbHash, PreviousBlockHash: nil})
 
-	simulator, _ := ledger.NewTxSimulator()
+	txid := util.GenerateUUID()
+	simulator, _ := ledger.NewTxSimulator(txid)
 	simulator.SetState("ns1", "key1", []byte("value1"))
 	simulator.SetState("ns1", "key2", []byte("value2"))
 	simulator.SetState("ns1", "key3", []byte("value3"))
 	simulator.Done()
 
 	simRes, _ := simulator.GetTxSimulationResults()
-	block1 := testutil.ConstructBlock(t, 1, gbHash, [][]byte{simRes}, true)
+	simResBytes, _ := simRes.GetPubSimulationBytes()
+	block1 := testutil.ConstructBlock(t, 1, gbHash, [][]byte{simResBytes}, true)
 
-	err = committer.Commit(block1)
+	err = committer.CommitWithPvtData(&ledger2.BlockAndPvtData{
+		Block: block1,
+	})
 	assert.NoError(t, err)
 
 	height, err = committer.LedgerHeight()
@@ -89,7 +94,7 @@ func TestNewLedgerCommitterReactive(t *testing.T) {
 	defer ledger.Close()
 
 	var configArrived int32
-	committer := NewLedgerCommitterReactive(ledger, &validator.MockValidator{}, func(_ *common.Block) error {
+	committer := NewLedgerCommitterReactive(ledger, func(_ *common.Block) error {
 		atomic.AddInt32(&configArrived, 1)
 		return nil
 	})
@@ -99,8 +104,10 @@ func TestNewLedgerCommitterReactive(t *testing.T) {
 	assert.NoError(t, err)
 
 	profile := localconfig.Load(localconfig.SampleSingleMSPSoloProfile)
-	block := provisional.New(profile).GenesisBlockForChannel(chainID)
+	block := encoder.New(profile).GenesisBlockForChannel(chainID)
 
-	committer.Commit(block)
+	committer.CommitWithPvtData(&ledger2.BlockAndPvtData{
+		Block: block,
+	})
 	assert.Equal(t, int32(1), atomic.LoadInt32(&configArrived))
 }

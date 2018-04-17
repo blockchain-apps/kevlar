@@ -1,17 +1,6 @@
 /*
-Copyright IBM Corp. 2016 All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-		 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Copyright IBM Corp. All Rights Reserved.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package lockbasedtxmgr
@@ -25,15 +14,24 @@ import (
 
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/ledger/testutil"
+	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/privacyenabledstate"
+	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/txmgr"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/version"
 	ledgertestutil "github.com/hyperledger/fabric/core/ledger/testutil"
+	"github.com/hyperledger/fabric/core/ledger/util"
 	"github.com/hyperledger/fabric/protos/ledger/queryresult"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
 	ledgertestutil.SetupCoreYAMLConfig()
 	flogging.SetModuleLevel("lockbasedtxmgr", "debug")
-
+	flogging.SetModuleLevel("statevalidator", "debug")
+	flogging.SetModuleLevel("statebasedval", "debug")
+	flogging.SetModuleLevel("statecouchdb", "debug")
+	flogging.SetModuleLevel("valimpl", "debug")
+	viper.Set("peer.fileSystemPath", "/tmp/fabric/ledgertests/kvledger/txmgmt/txmgr/lockbasedtxmgr")
 	os.Exit(m.Run())
 }
 
@@ -50,7 +48,7 @@ func TestTxSimulatorWithNoExistingData(t *testing.T) {
 
 func testTxSimulatorWithNoExistingData(t *testing.T, env testEnv) {
 	txMgr := env.getTxMgr()
-	s, _ := txMgr.NewTxSimulator()
+	s, _ := txMgr.NewTxSimulator("test_txid")
 	value, err := s.GetState("ns1", "key1")
 	testutil.AssertNoError(t, err, fmt.Sprintf("Error in GetState(): %s", err))
 	testutil.AssertNil(t, value)
@@ -62,6 +60,10 @@ func testTxSimulatorWithNoExistingData(t *testing.T, env testEnv) {
 
 	value, _ = s.GetState("ns2", "key3")
 	testutil.AssertNil(t, value)
+
+	simulationResults, err := s.GetTxSimulationResults()
+	assert.NoError(t, err)
+	assert.Nil(t, simulationResults.PvtSimulationResults)
 }
 
 func TestTxSimulatorWithExistingData(t *testing.T) {
@@ -79,7 +81,7 @@ func testTxSimulatorWithExistingData(t *testing.T, env testEnv) {
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
 	// simulate tx1
-	s1, _ := txMgr.NewTxSimulator()
+	s1, _ := txMgr.NewTxSimulator("test_tx1")
 	s1.SetState("ns1", "key1", []byte("value1"))
 	s1.SetState("ns1", "key2", []byte("value2"))
 	s1.SetState("ns2", "key3", []byte("value3"))
@@ -87,10 +89,10 @@ func testTxSimulatorWithExistingData(t *testing.T, env testEnv) {
 	s1.Done()
 	// validate and commit RWset
 	txRWSet1, _ := s1.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet1)
+	txMgrHelper.validateAndCommitRWSet(txRWSet1.PubSimulationResults)
 
 	// simulate tx2 that make changes to existing data
-	s2, _ := txMgr.NewTxSimulator()
+	s2, _ := txMgr.NewTxSimulator("test_tx2")
 	value, _ := s2.GetState("ns1", "key1")
 	testutil.AssertEquals(t, value, []byte("value1"))
 	s2.SetState("ns1", "key1", []byte("value1_1"))
@@ -100,10 +102,10 @@ func testTxSimulatorWithExistingData(t *testing.T, env testEnv) {
 	s2.Done()
 	// validate and commit RWset for tx2
 	txRWSet2, _ := s2.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet2)
+	txMgrHelper.validateAndCommitRWSet(txRWSet2.PubSimulationResults)
 
 	// simulate tx3
-	s3, _ := txMgr.NewTxSimulator()
+	s3, _ := txMgr.NewTxSimulator("test_tx3")
 	value, _ = s3.GetState("ns1", "key1")
 	testutil.AssertEquals(t, value, []byte("value1_1"))
 	value, _ = s3.GetState("ns2", "key3")
@@ -131,7 +133,7 @@ func testTxValidation(t *testing.T, env testEnv) {
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
 	// simulate tx1
-	s1, _ := txMgr.NewTxSimulator()
+	s1, _ := txMgr.NewTxSimulator("test_tx1")
 	s1.SetState("ns1", "key1", []byte("value1"))
 	s1.SetState("ns1", "key2", []byte("value2"))
 	s1.SetState("ns2", "key3", []byte("value3"))
@@ -139,11 +141,11 @@ func testTxValidation(t *testing.T, env testEnv) {
 	s1.Done()
 	// validate and commit RWset
 	txRWSet1, _ := s1.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet1)
+	txMgrHelper.validateAndCommitRWSet(txRWSet1.PubSimulationResults)
 
 	// simulate tx2 that make changes to existing data.
 	// tx2: Read/Update ns1:key1, Delete ns2:key3.
-	s2, _ := txMgr.NewTxSimulator()
+	s2, _ := txMgr.NewTxSimulator("test_tx2")
 	value, _ := s2.GetState("ns1", "key1")
 	testutil.AssertEquals(t, value, []byte("value1"))
 
@@ -153,28 +155,28 @@ func testTxValidation(t *testing.T, env testEnv) {
 
 	// simulate tx3 before committing tx2 changes. Reads and modifies the key changed by tx2.
 	// tx3: Read/Update ns1:key1
-	s3, _ := txMgr.NewTxSimulator()
+	s3, _ := txMgr.NewTxSimulator("test_tx3")
 	s3.GetState("ns1", "key1")
 	s3.SetState("ns1", "key1", []byte("value1_3"))
 	s3.Done()
 
 	// simulate tx4 before committing tx2 changes. Reads and Deletes the key changed by tx2
 	// tx4: Read/Delete ns2:key3
-	s4, _ := txMgr.NewTxSimulator()
+	s4, _ := txMgr.NewTxSimulator("test_tx4")
 	s4.GetState("ns2", "key3")
 	s4.DeleteState("ns2", "key3")
 	s4.Done()
 
 	// simulate tx5 before committing tx2 changes. Modifies and then Reads the key changed by tx2 and writes a new key
 	// tx5: Update/Read ns1:key1
-	s5, _ := txMgr.NewTxSimulator()
+	s5, _ := txMgr.NewTxSimulator("test_tx5")
 	s5.SetState("ns1", "key1", []byte("new_value"))
 	s5.GetState("ns1", "key1")
 	s5.Done()
 
 	// simulate tx6 before committing tx2 changes. Only writes a new key, does not reads/writes a key changed by tx2
 	// tx6: Update ns1:new_key
-	s6, _ := txMgr.NewTxSimulator()
+	s6, _ := txMgr.NewTxSimulator("test_tx6")
 	s6.SetState("ns1", "new_key", []byte("new_value"))
 	s6.Done()
 
@@ -187,21 +189,21 @@ func testTxValidation(t *testing.T, env testEnv) {
 
 	// validate and commit RWset for tx2
 	txRWSet2, _ := s2.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet2)
+	txMgrHelper.validateAndCommitRWSet(txRWSet2.PubSimulationResults)
 
 	//RWSet for tx3 and tx4 and tx5 should be invalid now due to read conflicts
 	txRWSet3, _ := s3.GetTxSimulationResults()
-	txMgrHelper.checkRWsetInvalid(txRWSet3)
+	txMgrHelper.checkRWsetInvalid(txRWSet3.PubSimulationResults)
 
 	txRWSet4, _ := s4.GetTxSimulationResults()
-	txMgrHelper.checkRWsetInvalid(txRWSet4)
+	txMgrHelper.checkRWsetInvalid(txRWSet4.PubSimulationResults)
 
 	txRWSet5, _ := s5.GetTxSimulationResults()
-	txMgrHelper.checkRWsetInvalid(txRWSet5)
+	txMgrHelper.checkRWsetInvalid(txRWSet5.PubSimulationResults)
 
 	// tx6 should still be valid as it only writes a new key
 	txRWSet6, _ := s6.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet6)
+	txMgrHelper.validateAndCommitRWSet(txRWSet6.PubSimulationResults)
 }
 
 func TestTxPhantomValidation(t *testing.T) {
@@ -218,7 +220,7 @@ func testTxPhantomValidation(t *testing.T, env testEnv) {
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
 	// simulate tx1
-	s1, _ := txMgr.NewTxSimulator()
+	s1, _ := txMgr.NewTxSimulator("test_tx1")
 	s1.SetState("ns", "key1", []byte("value1"))
 	s1.SetState("ns", "key2", []byte("value2"))
 	s1.SetState("ns", "key3", []byte("value3"))
@@ -228,10 +230,10 @@ func testTxPhantomValidation(t *testing.T, env testEnv) {
 	s1.Done()
 	// validate and commit RWset
 	txRWSet1, _ := s1.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet1)
+	txMgrHelper.validateAndCommitRWSet(txRWSet1.PubSimulationResults)
 
 	// simulate tx2
-	s2, _ := txMgr.NewTxSimulator()
+	s2, _ := txMgr.NewTxSimulator("test_tx2")
 	itr2, _ := s2.GetStateRangeScanIterator("ns", "key2", "key5")
 	for {
 		if result, _ := itr2.Next(); result == nil {
@@ -243,7 +245,7 @@ func testTxPhantomValidation(t *testing.T, env testEnv) {
 	txRWSet2, _ := s2.GetTxSimulationResults()
 
 	// simulate tx3
-	s3, _ := txMgr.NewTxSimulator()
+	s3, _ := txMgr.NewTxSimulator("test_tx3")
 	itr3, _ := s3.GetStateRangeScanIterator("ns", "key2", "key5")
 	for {
 		if result, _ := itr3.Next(); result == nil {
@@ -255,7 +257,7 @@ func testTxPhantomValidation(t *testing.T, env testEnv) {
 	txRWSet3, _ := s3.GetTxSimulationResults()
 
 	// simulate tx4
-	s4, _ := txMgr.NewTxSimulator()
+	s4, _ := txMgr.NewTxSimulator("test_tx4")
 	itr4, _ := s4.GetStateRangeScanIterator("ns", "key4", "key6")
 	for {
 		if result, _ := itr4.Next(); result == nil {
@@ -267,11 +269,11 @@ func testTxPhantomValidation(t *testing.T, env testEnv) {
 	txRWSet4, _ := s4.GetTxSimulationResults()
 
 	// txRWSet2 should be valid
-	txMgrHelper.validateAndCommitRWSet(txRWSet2)
+	txMgrHelper.validateAndCommitRWSet(txRWSet2.PubSimulationResults)
 	// txRWSet2 makes txRWSet3 invalid as it deletes a key in the range
-	txMgrHelper.checkRWsetInvalid(txRWSet3)
+	txMgrHelper.checkRWsetInvalid(txRWSet3.PubSimulationResults)
 	// txRWSet4 should be valid as it iterates over a different range
-	txMgrHelper.validateAndCommitRWSet(txRWSet4)
+	txMgrHelper.validateAndCommitRWSet(txRWSet4.PubSimulationResults)
 }
 
 func TestIterator(t *testing.T) {
@@ -306,10 +308,10 @@ func TestIterator(t *testing.T) {
 }
 
 func testIterator(t *testing.T, env testEnv, numKeys int, startKeyNum int, endKeyNum int) {
-	cID := "cID"
+	cID := "cid"
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
-	s, _ := txMgr.NewTxSimulator()
+	s, _ := txMgr.NewTxSimulator("test_tx1")
 	for i := 1; i <= numKeys; i++ {
 		k := createTestKey(i)
 		v := createTestValue(i)
@@ -319,7 +321,7 @@ func testIterator(t *testing.T, env testEnv, numKeys int, startKeyNum int, endKe
 	s.Done()
 	// validate and commit RWset
 	txRWSet, _ := s.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet)
+	txMgrHelper.validateAndCommitRWSet(txRWSet.PubSimulationResults)
 
 	var startKey string
 	var endKey string
@@ -344,7 +346,7 @@ func testIterator(t *testing.T, env testEnv, numKeys int, startKeyNum int, endKe
 
 	expectedCount := end - begin
 
-	queryExecuter, _ := txMgr.NewQueryExecutor()
+	queryExecuter, _ := txMgr.NewQueryExecutor("test_tx2")
 	itr, _ := queryExecuter.GetStateRangeScanIterator(cID, startKey, endKey)
 	count := 0
 	for {
@@ -374,10 +376,10 @@ func TestIteratorWithDeletes(t *testing.T) {
 }
 
 func testIteratorWithDeletes(t *testing.T, env testEnv) {
-	cID := "cID"
+	cID := "cid"
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
-	s, _ := txMgr.NewTxSimulator()
+	s, _ := txMgr.NewTxSimulator("test_tx1")
 	for i := 1; i <= 10; i++ {
 		k := createTestKey(i)
 		v := createTestValue(i)
@@ -387,16 +389,16 @@ func testIteratorWithDeletes(t *testing.T, env testEnv) {
 	s.Done()
 	// validate and commit RWset
 	txRWSet1, _ := s.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet1)
+	txMgrHelper.validateAndCommitRWSet(txRWSet1.PubSimulationResults)
 
-	s, _ = txMgr.NewTxSimulator()
+	s, _ = txMgr.NewTxSimulator("test_tx2")
 	s.DeleteState(cID, createTestKey(4))
 	s.Done()
 	// validate and commit RWset
 	txRWSet2, _ := s.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet2)
+	txMgrHelper.validateAndCommitRWSet(txRWSet2.PubSimulationResults)
 
-	queryExecuter, _ := txMgr.NewQueryExecutor()
+	queryExecuter, _ := txMgr.NewQueryExecutor("test_tx3")
 	itr, _ := queryExecuter.GetStateRangeScanIterator(cID, createTestKey(3), createTestKey(6))
 	defer itr.Close()
 	kv, _ := itr.Next()
@@ -416,12 +418,12 @@ func TestTxValidationWithItr(t *testing.T) {
 }
 
 func testTxValidationWithItr(t *testing.T, env testEnv) {
-	cID := "cID"
+	cID := "cid"
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
 
 	// simulate tx1
-	s1, _ := txMgr.NewTxSimulator()
+	s1, _ := txMgr.NewTxSimulator("test_tx1")
 	for i := 1; i <= 10; i++ {
 		k := createTestKey(i)
 		v := createTestValue(i)
@@ -431,10 +433,10 @@ func testTxValidationWithItr(t *testing.T, env testEnv) {
 	s1.Done()
 	// validate and commit RWset
 	txRWSet1, _ := s1.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet1)
+	txMgrHelper.validateAndCommitRWSet(txRWSet1.PubSimulationResults)
 
 	// simulate tx2 that reads key_001 and key_002
-	s2, _ := txMgr.NewTxSimulator()
+	s2, _ := txMgr.NewTxSimulator("test_tx2")
 	itr, _ := s2.GetStateRangeScanIterator(cID, createTestKey(1), createTestKey(5))
 	// read key_001 and key_002
 	itr.Next()
@@ -443,7 +445,7 @@ func testTxValidationWithItr(t *testing.T, env testEnv) {
 	s2.Done()
 
 	// simulate tx3 that reads key_004 and key_005
-	s3, _ := txMgr.NewTxSimulator()
+	s3, _ := txMgr.NewTxSimulator("test_tx3")
 	itr, _ = s3.GetStateRangeScanIterator(cID, createTestKey(4), createTestKey(6))
 	// read key_001 and key_002
 	itr.Next()
@@ -452,21 +454,21 @@ func testTxValidationWithItr(t *testing.T, env testEnv) {
 	s3.Done()
 
 	// simulate tx4 before committing tx2 and tx3. Modifies a key read by tx3
-	s4, _ := txMgr.NewTxSimulator()
+	s4, _ := txMgr.NewTxSimulator("test_tx4")
 	s4.DeleteState(cID, createTestKey(5))
 	s4.Done()
 
 	// validate and commit RWset for tx4
 	txRWSet4, _ := s4.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet4)
+	txMgrHelper.validateAndCommitRWSet(txRWSet4.PubSimulationResults)
 
 	//RWSet tx3 should be invalid now
 	txRWSet3, _ := s3.GetTxSimulationResults()
-	txMgrHelper.checkRWsetInvalid(txRWSet3)
+	txMgrHelper.checkRWsetInvalid(txRWSet3.PubSimulationResults)
 
 	// tx2 should still be valid
 	txRWSet2, _ := s2.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet2)
+	txMgrHelper.validateAndCommitRWSet(txRWSet2.PubSimulationResults)
 
 }
 
@@ -481,11 +483,11 @@ func TestGetSetMultipeKeys(t *testing.T) {
 }
 
 func testGetSetMultipeKeys(t *testing.T, env testEnv) {
-	cID := "cID"
+	cID := "cid"
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
 	// simulate tx1
-	s1, _ := txMgr.NewTxSimulator()
+	s1, _ := txMgr.NewTxSimulator("test_tx1")
 	multipleKeyMap := make(map[string][]byte)
 	for i := 1; i <= 10; i++ {
 		k := createTestKey(i)
@@ -496,8 +498,8 @@ func testGetSetMultipeKeys(t *testing.T, env testEnv) {
 	s1.Done()
 	// validate and commit RWset
 	txRWSet, _ := s1.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet)
-	qe, _ := txMgr.NewQueryExecutor()
+	txMgrHelper.validateAndCommitRWSet(txRWSet.PubSimulationResults)
+	qe, _ := txMgr.NewQueryExecutor("test_tx2")
 	defer qe.Done()
 	multipleKeys := []string{}
 	for k := range multipleKeyMap {
@@ -509,7 +511,7 @@ func testGetSetMultipeKeys(t *testing.T, env testEnv) {
 		testutil.AssertEquals(t, v, multipleKeyMap[multipleKeys[i]])
 	}
 
-	s2, _ := txMgr.NewTxSimulator()
+	s2, _ := txMgr.NewTxSimulator("test_tx3")
 	defer s2.Done()
 	values, _ = s2.GetStateMultipleKeys(cID, multipleKeys[5:7])
 	testutil.AssertEquals(t, len(values), 2)
@@ -558,7 +560,7 @@ func testExecuteQuery(t *testing.T, env testEnv) {
 	txMgr := env.getTxMgr()
 	txMgrHelper := newTxMgrTestHelper(t, txMgr)
 
-	s1, _ := txMgr.NewTxSimulator()
+	s1, _ := txMgr.NewTxSimulator("test_tx1")
 
 	s1.SetState("ns1", "key1", []byte("value1"))
 	s1.SetState("ns1", "key2", []byte("value2"))
@@ -580,9 +582,9 @@ func testExecuteQuery(t *testing.T, env testEnv) {
 
 	// validate and commit RWset
 	txRWSet, _ := s1.GetTxSimulationResults()
-	txMgrHelper.validateAndCommitRWSet(txRWSet)
+	txMgrHelper.validateAndCommitRWSet(txRWSet.PubSimulationResults)
 
-	queryExecuter, _ := txMgr.NewQueryExecutor()
+	queryExecuter, _ := txMgr.NewQueryExecutor("test_tx2")
 	queryString := "{\"selector\":{\"owner\": {\"$eq\": \"bob\"}},\"limit\": 10,\"skip\": 0}"
 
 	itr, err := queryExecuter.ExecuteQuery("ns1", queryString)
@@ -610,7 +612,7 @@ func TestValidateKey(t *testing.T) {
 	for _, testEnv := range testEnvs {
 		testLedgerID := "test.validate.key"
 		testEnv.init(t, testLedgerID)
-		txSimulator, _ := testEnv.getTxMgr().NewTxSimulator()
+		txSimulator, _ := testEnv.getTxMgr().NewTxSimulator("test_tx1")
 		err := txSimulator.SetState("ns1", nonUTF8Key, dummyValue)
 		if testEnv.getName() == levelDBtestEnvName {
 			testutil.AssertNoError(t, err, "")
@@ -620,4 +622,117 @@ func TestValidateKey(t *testing.T) {
 		}
 		testEnv.cleanup()
 	}
+}
+
+// TestTxSimulatorUnsupportedTx verifies that a simulation must throw an error when an unsupported transaction
+// is perfromed - queries on private data are supported in a read-only tran
+func TestTxSimulatorUnsupportedTx(t *testing.T) {
+	testEnv := testEnvs[0]
+	testEnv.init(t, "TestTxSimulatorUnsupportedTxQueries")
+	defer testEnv.cleanup()
+	txMgr := testEnv.getTxMgr()
+
+	simulator, _ := txMgr.NewTxSimulator("txid1")
+	err := simulator.SetState("ns", "key", []byte("value"))
+	testutil.AssertNoError(t, err, "")
+	_, err = simulator.GetPrivateDataRangeScanIterator("ns1", "coll1", "startKey", "endKey")
+	_, ok := err.(*txmgr.ErrUnsupportedTransaction)
+	testutil.AssertEquals(t, ok, true)
+
+	simulator, _ = txMgr.NewTxSimulator("txid2")
+	_, err = simulator.GetPrivateDataRangeScanIterator("ns1", "coll1", "startKey", "endKey")
+	testutil.AssertNoError(t, err, "")
+	err = simulator.SetState("ns", "key", []byte("value"))
+	_, ok = err.(*txmgr.ErrUnsupportedTransaction)
+	testutil.AssertEquals(t, ok, true)
+}
+
+func TestTxSimulatorMissingPvtdata(t *testing.T) {
+	testEnv := testEnvs[0]
+	testEnv.init(t, "TestTxSimulatorUnsupportedTxQueries")
+	defer testEnv.cleanup()
+
+	db := testEnv.getVDB()
+	updateBatch := privacyenabledstate.NewUpdateBatch()
+	updateBatch.HashUpdates.Put("ns1", "coll1", util.ComputeStringHash("key1"), util.ComputeStringHash("value1"), version.NewHeight(1, 1))
+	updateBatch.PvtUpdates.Put("ns1", "coll1", "key1", []byte("value1"), version.NewHeight(1, 1))
+	db.ApplyPrivacyAwareUpdates(updateBatch, version.NewHeight(1, 1))
+
+	txMgr := testEnv.getTxMgr()
+	simulator, _ := txMgr.NewTxSimulator("testTxid1")
+	val, _ := simulator.GetPrivateData("ns1", "coll1", "key1")
+	testutil.AssertEquals(t, val, []byte("value1"))
+	simulator.Done()
+
+	updateBatch = privacyenabledstate.NewUpdateBatch()
+	updateBatch.HashUpdates.Put("ns1", "coll1", util.ComputeStringHash("key1"), util.ComputeStringHash("value1"), version.NewHeight(2, 1))
+	updateBatch.HashUpdates.Put("ns1", "coll2", util.ComputeStringHash("key2"), util.ComputeStringHash("value2"), version.NewHeight(2, 1))
+	updateBatch.HashUpdates.Put("ns1", "coll3", util.ComputeStringHash("key3"), util.ComputeStringHash("value3"), version.NewHeight(2, 1))
+	updateBatch.PvtUpdates.Put("ns1", "coll3", "key3", []byte("value3"), version.NewHeight(2, 1))
+	db.ApplyPrivacyAwareUpdates(updateBatch, version.NewHeight(2, 1))
+	simulator, _ = txMgr.NewTxSimulator("testTxid2")
+	defer simulator.Done()
+
+	val, err := simulator.GetPrivateData("ns1", "coll1", "key1")
+	_, ok := err.(*txmgr.ErrPvtdataNotAvailable)
+	testutil.AssertEquals(t, ok, true)
+
+	val, err = simulator.GetPrivateData("ns1", "coll2", "key2")
+	_, ok = err.(*txmgr.ErrPvtdataNotAvailable)
+	testutil.AssertEquals(t, ok, true)
+
+	val, err = simulator.GetPrivateData("ns1", "coll3", "key3")
+	testutil.AssertEquals(t, val, []byte("value3"))
+
+	val, err = simulator.GetPrivateData("ns1", "coll4", "key4")
+	testutil.AssertNoError(t, err, "")
+	testutil.AssertNil(t, val)
+}
+
+func TestDeleteOnCursor(t *testing.T) {
+	cID := "cid"
+	env := testEnvs[0]
+	env.init(t, "TestDeleteOnCursor")
+	defer env.cleanup()
+
+	txMgr := env.getTxMgr()
+	txMgrHelper := newTxMgrTestHelper(t, txMgr)
+
+	// Simulate and commit tx1 to populate sample data (key_001 through key_010)
+	s, _ := txMgr.NewTxSimulator("test_tx1")
+	for i := 1; i <= 10; i++ {
+		k := createTestKey(i)
+		v := createTestValue(i)
+		t.Logf("Adding k=[%s], v=[%s]", k, v)
+		s.SetState(cID, k, v)
+	}
+	s.Done()
+	txRWSet1, _ := s.GetTxSimulationResults()
+	txMgrHelper.validateAndCommitRWSet(txRWSet1.PubSimulationResults)
+
+	// simulate and commit tx2 that reads keys key_001 through key_004 and deletes them one by one (in a loop - itr.Next() followed by Delete())
+	s2, _ := txMgr.NewTxSimulator("test_tx2")
+	itr2, _ := s2.GetStateRangeScanIterator(cID, createTestKey(1), createTestKey(5))
+	for i := 1; i <= 4; i++ {
+		kv, err := itr2.Next()
+		testutil.AssertNoError(t, err, "")
+		testutil.AssertNotNil(t, kv)
+		key := kv.(*queryresult.KV).Key
+		s2.DeleteState(cID, key)
+	}
+	itr2.Close()
+	s2.Done()
+	txRWSet2, _ := s2.GetTxSimulationResults()
+	txMgrHelper.validateAndCommitRWSet(txRWSet2.PubSimulationResults)
+
+	// simulate tx3 to verify that the keys key_001 through key_004 got deleted
+	s3, _ := txMgr.NewTxSimulator("test_tx3")
+	itr3, _ := s3.GetStateRangeScanIterator(cID, createTestKey(1), createTestKey(10))
+	kv, err := itr3.Next()
+	testutil.AssertNoError(t, err, "")
+	testutil.AssertNotNil(t, kv)
+	key := kv.(*queryresult.KV).Key
+	testutil.AssertEquals(t, key, "key_005")
+	itr3.Close()
+	s3.Done()
 }

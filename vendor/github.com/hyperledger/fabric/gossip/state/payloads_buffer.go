@@ -1,24 +1,12 @@
 /*
-Copyright IBM Corp. 2016 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-		 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package state
 
 import (
-	"fmt"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -33,7 +21,7 @@ import (
 // to signal whenever expected block has arrived.
 type PayloadsBuffer interface {
 	// Adds new block into the buffer
-	Push(payload *proto.Payload) error
+	Push(payload *proto.Payload)
 
 	// Returns next expected sequence number
 	Next() uint64
@@ -85,15 +73,15 @@ func (b *PayloadsBufferImpl) Ready() chan struct{} {
 // Push new payload into the buffer structure in case new arrived payload
 // sequence number is below the expected next block number payload will be
 // thrown away and error will be returned.
-func (b *PayloadsBufferImpl) Push(payload *proto.Payload) error {
+func (b *PayloadsBufferImpl) Push(payload *proto.Payload) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
 	seqNum := payload.SeqNum
 
 	if seqNum < b.next || b.buf[seqNum] != nil {
-		return fmt.Errorf("Payload with sequence number = %s has been already processed",
-			strconv.FormatUint(payload.SeqNum, 10))
+		logger.Debugf("Payload with sequence number = %d has been already processed", payload.SeqNum)
+		return
 	}
 
 	b.buf[seqNum] = payload
@@ -105,7 +93,6 @@ func (b *PayloadsBufferImpl) Push(payload *proto.Payload) error {
 			b.readyChan <- struct{}{}
 		}()
 	}
-	return nil
 }
 
 // Next function provides the number of the next expected block
@@ -133,8 +120,8 @@ func (b *PayloadsBufferImpl) Pop() *proto.Payload {
 
 // Size returns current number of payloads stored within buffer
 func (b *PayloadsBufferImpl) Size() int {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
 	return len(b.buf)
 }
 

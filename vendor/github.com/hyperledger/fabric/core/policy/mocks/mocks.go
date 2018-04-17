@@ -18,10 +18,9 @@ package mocks
 
 import (
 	"bytes"
-
-	"fmt"
-
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/msp"
@@ -46,14 +45,6 @@ func (m *MockChannelPolicyManager) GetPolicy(id string) (policies.Policy, bool) 
 }
 
 func (m *MockChannelPolicyManager) Manager(path []string) (policies.Manager, bool) {
-	panic("Not implemented")
-}
-
-func (m *MockChannelPolicyManager) BasePath() string {
-	panic("Not implemented")
-}
-
-func (m *MockChannelPolicyManager) PolicyNames() []string {
 	panic("Not implemented")
 }
 
@@ -87,6 +78,10 @@ func (d *MockIdentityDeserializer) DeserializeIdentity(serializedIdentity []byte
 	return nil, errors.New("Invalid Identity")
 }
 
+func (d *MockIdentityDeserializer) IsWellFormed(_ *mspproto.SerializedIdentity) error {
+	return nil
+}
+
 type MockIdentity struct {
 	identity []byte
 	msg      []byte
@@ -98,6 +93,10 @@ func (id *MockIdentity) SatisfiesPrincipal(p *mspproto.MSPPrincipal) error {
 		return fmt.Errorf("Different identities [% x]!=[% x]", id.identity, p.Principal)
 	}
 	return nil
+}
+
+func (id *MockIdentity) ExpiresAt() time.Time {
+	return time.Time{}
 }
 
 func (id *MockIdentity) GetIdentifier() *msp.IdentityIdentifier {

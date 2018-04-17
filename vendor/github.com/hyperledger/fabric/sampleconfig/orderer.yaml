@@ -34,12 +34,27 @@ General:
         Certificate: tls/server.crt
         RootCAs:
           - tls/ca.crt
-        ClientAuthEnabled: false
+        ClientAuthRequired: false
         ClientRootCAs:
+
+    # Keepalive settings for the GRPC server.
+    Keepalive:
+        # ServerMinInterval is the minimum permitted time between client pings.
+        # If clients send pings more frequently, the server will
+        # disconnect them.
+        ServerMinInterval: 60s
+        # ServerInterval is the time between pings to clients.
+        ServerInterval: 7200s
+        # ServerTimeout is the duration the server waits for a response from
+        # a client before closing the connection.
+        ServerTimeout: 20s
 
     # Log Level: The level at which to log. This accepts logging specifications
     # per: fabric/docs/Setup/logging-control.md
     LogLevel: info
+
+    # Log Format:  The format string to use when logging.  Especially useful to disable color logging
+    LogFormat: '%{color}%{time:2006-01-02 15:04:05.000 MST} [%{module}] %{shortfunc} -> %{level:.4s} %{id:03x}%{color:reset} %{message}'
 
     # Genesis method: The method by which the genesis block for the orderer
     # system channel is specified. Available options are "provisional", "file":
@@ -67,7 +82,7 @@ General:
 
     # LocalMSPID is the identity to register the local MSP material with the MSP
     # manager. IMPORTANT: The local MSP ID of an orderer needs to match the MSP
-    # ID of one of the organizations defined in the orderer system channel's 
+    # ID of one of the organizations defined in the orderer system channel's
     # /Channel/Orderer configuration. The sample organization defined in the
     # sample configuration provided has an MSP ID of "DEFAULT".
     LocalMSPID: DEFAULT
@@ -99,6 +114,13 @@ General:
             # chosen using: 'LocalMSPDir'/keystore
             FileKeyStore:
                 KeyStore:
+
+    # Authentication contains configuration parameters related to authenticating
+    # client messages
+    Authentication:
+        # the acceptable difference between the current server time and the
+        # client's time as specified in a client request message
+        TimeWindow: 15m
 
 ################################################################################
 #
@@ -221,3 +243,24 @@ Kafka:
         # following "File" key and specify the file name from which to load the
         # value of RootCAs.
         #File: path/to/RootCAs
+
+    # Kafka protocol version used to communicate with the Kafka cluster brokers
+    # (defaults to 0.10.2.0 if not specified)
+    Version:
+
+################################################################################
+#
+#   Debug Configuration
+#
+#   - This controls the debugging options for the orderer
+#
+################################################################################
+Debug:
+
+    # BroadcastTraceDir when set will cause each request to the Broadcast service
+    # for this orderer to be written to a file in this directory
+    BroadcastTraceDir:
+
+    # DeliverTraceDir when set will cause each request to the Deliver service
+    # for this orderer to be written to a file in this directory
+    DeliverTraceDir:

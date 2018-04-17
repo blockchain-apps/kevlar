@@ -4,17 +4,19 @@ Chaincode for Developers
 What is Chaincode?
 ------------------
 
-Chaincode is a program, written in `Go <https://golang.org>`_ that implements a
-prescribed interface. Eventually, other programming languages such as Java,
+Chaincode is a program, written in `Go <https://golang.org>`_, `node.js <https://nodejs.org>`_,
+that implements a prescribed interface. Eventually, other programming languages such as Java,
 will be supported. Chaincode runs in a secured Docker container isolated from
 the endorsing peer process. Chaincode initializes and manages the ledger state
 through transactions submitted by applications.
 
 A chaincode typically handles business logic agreed to by members of the
-network, so it similar to a "smart contract". Ledger state created by
-a chaincode is scoped exclusively to that chaincode and can't be accessed
-directly by another chaincode. Given the appropriate permission, a chaincode may
-invoke another chaincode to access its state within the same network.
+network, so it similar to a "smart contract". A chaincode can be invoked to update or query 
+the ledger in a proposal transaction. Given the appropriate permission, a chaincode 
+may invoke another chaincode, either in the same channel or in different channels, to access its state. 
+Note that, if the called chaincode is on a different channel from the calling chaincode,
+only read query is allowed. That is, the called chaincode on a different channel is only a `Query`,
+which does not participate in state validation checks in subsequent commit phase.
 
 In the following sections, we will explore chaincode through the eyes of an
 application developer. We'll present a simple chaincode sample application
@@ -23,8 +25,11 @@ and walk through the purpose of each method in the Chaincode Shim API.
 Chaincode API
 -------------
 
-Every chaincode program must implement the
-`Chaincode interface <https://github.com/hyperledger/fabric/blob/master/core/chaincode/shim/interfaces.go#L28>`_
+Every chaincode program must implement the ``Chaincode interface``:
+
+  - `Go <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#Chaincode>`_
+  - `node.js <https://fabric-shim.github.io/ChaincodeInterface.html>`_
+
 whose methods are called in response to received transactions.
 In particular the ``Init`` method is called when a
 chaincode receives an ``instantiate`` or ``upgrade`` transaction so that the
@@ -32,8 +37,11 @@ chaincode may perform any necessary initialization, including initialization of
 application state. The ``Invoke`` method is called in response to receiving an
 ``invoke`` transaction to process transaction proposals.
 
-The other interface in the chaincode "shim" APIs is the
-`ChaincodeStubInterface <https://github.com/hyperledger/fabric/blob/master/core/chaincode/shim/interfaces.go#L42>`_
+The other interface in the chaincode "shim" APIs is the ``ChaincodeStubInterface``:
+
+  - `Go <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#ChaincodeStub>`_
+  - `node.js <https://fabric-shim.github.io/ChaincodeStub.html>`_
+
 which is used to access and modify the ledger, and to make invocations between
 chaincodes.
 
@@ -51,7 +59,7 @@ Choosing a Location for the Code
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If you haven't been doing programming in Go, you may want to make sure that
-you have :ref:_Golang installed and your system properly configured.
+you have :ref:`Golang` installed and your system properly configured.
 
 Now, you will want to create a directory for your chaincode application as a
 child directory of ``$GOPATH/src/``.
@@ -72,10 +80,12 @@ Housekeeping
 ^^^^^^^^^^^^
 
 First, let's start with some housekeeping. As with every chaincode, it implements the
-`Chaincode interface` <https://github.com/hyperledger/fabric/blob/master/core/chaincode/shim/interfaces.go#L28>_,
+`Chaincode interface <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#Chaincode>`_
 in particular, ``Init`` and ``Invoke`` functions. So, let's add the go import
 statements for the necessary dependencies for our chaincode. We'll import the
-chaincode shim package and the peer protobuf package.
+chaincode shim package and the
+`peer protobuf package <http://godoc.org/github.com/hyperledger/fabric/protos/peer>`_.
+Next, let's add a struct ``SimpleAsset`` as a receiver for Chaincode shim functions.
 
 .. code:: go
 
@@ -87,6 +97,10 @@ chaincode shim package and the peer protobuf package.
     	"github.com/hyperledger/fabric/core/chaincode/shim"
     	"github.com/hyperledger/fabric/protos/peer"
     )
+
+    // SimpleAsset implements a simple chaincode to manage an asset
+    type SimpleAsset struct {
+    }
 
 Initializing the Chaincode
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -106,8 +120,8 @@ Next, we'll implement the ``Init`` function.
           no "migration" or nothing to be initialized as part of the upgrade.
 
 Next, we'll retrieve the arguments to the ``Init`` call using the
-``ChaincodeStubInterface.GetStringArgs`` function and check for validity.
-In our case, we are expecting a key-value pair.
+`ChaincodeStubInterface.GetStringArgs <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#ChaincodeStub.GetStringArgs>`_
+function and check for validity. In our case, we are expecting a key-value pair.
 
   .. code:: go
 
@@ -125,9 +139,9 @@ In our case, we are expecting a key-value pair.
 
 Next, now that we have established that the call is valid, we'll store the
 initial state in the ledger. To do this, we will call
-``ChaincodeStubInterface.PutState`` with the key and value passed in as
-the arguments. Assuming all went well, return a peer.Response object that
-indicates the initialization was a success.
+`ChaincodeStubInterface.PutState <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#ChaincodeStub.PutState>`_
+with the key and value passed in as the arguments. Assuming all went well,
+return a peer.Response object that indicates the initialization was a success.
 
 .. code:: go
 
@@ -171,8 +185,9 @@ As with the ``Init`` function above, we need to extract the arguments from the
 name of the chaincode application function to invoke. In our case, our application
 will simply have two functions: ``set`` and ``get``, that allow the value of an
 asset to be set or its current state to be retrieved. We first call
-``ChaincodeStubInterface.GetFunctionAndParameters`` to extract the function
-name and the parameters to that chaincode application function.
+`ChaincodeStubInterface.GetFunctionAndParameters <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#ChaincodeStub.GetFunctionAndParameters>`_
+to extract the function name and the parameters to that chaincode application
+function.
 
 .. code:: go
 
@@ -220,7 +235,8 @@ Implementing the Chaincode Application
 As noted, our chaincode application implements two functions that can be
 invoked via the ``Invoke`` function. Let's implement those functions now.
 Note that as we mentioned above, to access the ledger's state, we will leverage
-the ``ChaincodeStubInterface.PutState`` and ``ChaincodeStubInterface.GetState``
+the `ChaincodeStubInterface.PutState <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#ChaincodeStub.PutState>`_
+and `ChaincodeStubInterface.GetState <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#ChaincodeStub.GetState>`_
 functions of the chaincode shim API.
 
 .. code:: go
@@ -261,7 +277,8 @@ Pulling it All Together
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 Finally, we need to add the ``main`` function, which will call the
-``shim.Start`` function. Here's the whole chaincode program source.
+`shim.Start <http://godoc.org/github.com/hyperledger/fabric/core/chaincode/shim#Start>`_
+function. Here's the whole chaincode program source.
 
 .. code:: go
 
@@ -364,7 +381,8 @@ Now let's compile your chaincode.
 
 .. code:: bash
 
-  go build
+  go get -u --tags nopkcs11 github.com/hyperledger/fabric/core/chaincode/shim
+  go build --tags nopkcs11
 
 Assuming there are no errors, now we can proceed to the next step, testing
 your chaincode.
@@ -381,8 +399,8 @@ We start "dev mode" by leveraging pre-generated orderer and channel artifacts fo
 a sample dev network.  As such, the user can immediately jump into the process
 of compiling chaincode and driving calls.
 
-Install Fabric Samples
-----------------------
+Install Hyperledger Fabric Samples
+----------------------------------
 
 If you haven't already done so, please install the :doc:`samples`.
 
@@ -393,12 +411,12 @@ clone:
 
   cd chaincode-docker-devmode
 
-Download docker images
+Download Docker images
 ----------------------
 
-We need four docker images in order for "dev mode" to run against the supplied
+We need four Docker images in order for "dev mode" to run against the supplied
 docker compose script.  If you installed the ``fabric-samples`` repo clone and
-followed the instructions to :ref:`download-platform-specific-binaries`, then
+followed the instructions to :ref:`binaries`, then
 you should have the necessary Docker images installed locally.
 
 .. note:: If you choose to manually pull the images then you must retag them as
@@ -412,15 +430,15 @@ should see something similar to following:
   docker images
   REPOSITORY                     TAG                                  IMAGE ID            CREATED             SIZE
   hyperledger/fabric-tools       latest                               e09f38f8928d        4 hours ago         1.32 GB
-  hyperledger/fabric-tools       x86_64-1.0.0-rc1-snapshot-f20846c6   e09f38f8928d        4 hours ago         1.32 GB
+  hyperledger/fabric-tools       x86_64-1.0.0                         e09f38f8928d        4 hours ago         1.32 GB
   hyperledger/fabric-orderer     latest                               0df93ba35a25        4 hours ago         179 MB
-  hyperledger/fabric-orderer     x86_64-1.0.0-rc1-snapshot-f20846c6   0df93ba35a25        4 hours ago         179 MB
+  hyperledger/fabric-orderer     x86_64-1.0.0                         0df93ba35a25        4 hours ago         179 MB
   hyperledger/fabric-peer        latest                               533aec3f5a01        4 hours ago         182 MB
-  hyperledger/fabric-peer        x86_64-1.0.0-rc1-snapshot-f20846c6   533aec3f5a01        4 hours ago         182 MB
+  hyperledger/fabric-peer        x86_64-1.0.0                         533aec3f5a01        4 hours ago         182 MB
   hyperledger/fabric-ccenv       latest                               4b70698a71d3        4 hours ago         1.29 GB
-  hyperledger/fabric-ccenv       x86_64-1.0.0-rc1-snapshot-f20846c6   4b70698a71d3        4 hours ago         1.29 GB
+  hyperledger/fabric-ccenv       x86_64-1.0.0                         4b70698a71d3        4 hours ago         1.29 GB
 
-.. note:: If you retrieved the images through the :ref:`download-platform-specific-binaries`,
+.. note:: If you retrieved the images through the :ref:`binaries`,
           then you will see additional images listed.  However, we are only concerned with
           these four.
 
@@ -464,7 +482,7 @@ Now run the chaincode:
 
 .. code:: bash
 
-  CORE_PEER_ADDRESS=peer:7051 CORE_CHAINCODE_ID_NAME=mycc:0 ./sacc
+  CORE_PEER_ADDRESS=peer:7052 CORE_CHAINCODE_ID_NAME=mycc:0 ./sacc
 
 The chaincode is started with peer and chaincode logs indicating successful registration with the peer.
 Note that at this stage the chaincode is not associated with any channel. This is done in subsequent steps
@@ -506,6 +524,46 @@ Testing new chaincode
 By default, we mount only ``sacc``.  However, you can easily test different
 chaincodes by adding them to the ``chaincode`` subdirectory and relaunching
 your network.  At this point they will be accessible in your ``chaincode`` container.
+
+Chaincode encryption
+--------------------
+
+In certain scenarios, it may be useful to encrypt values associated with a key
+in their entirety or simply in part.  For example, if a person's social security
+number or address was being written to the ledger, then you likely would not want
+this data to appear in plaintext.  Chaincode encryption is achieved by leveraging
+the `entities extension <https://github.com/hyperledger/fabric/tree/master/core/chaincode/shim/ext/entities>`__
+which is a BCCSP wrapper with commodity factories and functions to perform cryptographic
+operations such as encryption and elliptic curve digital signatures.  For example,
+to encrypt, the invoker of a chaincode passes in a cryptographic key via the
+transient field.  The same key may then be used for subsequent query operations, allowing
+for proper decryption of the encrypted state values.
+
+For more information and samples, see the
+`Encc Example <https://github.com/hyperledger/fabric/tree/master/examples/chaincode/go/enccc_example>`__
+within the ``fabric/examples`` directory.  Pay specific attention to the ``utils.go``
+helper program.  This utility loads the chaincode shim APIs and Entities extension
+and builds a new class of functions (e.g. ``encryptAndPutState`` & ``getStateAndDecrypt``)
+that the sample encryption chaincode then leverages.  As such, the chaincode can
+now marry the basic shim APIs of ``Get`` and ``Put`` with the added functionality of
+``Encrypt`` and ``Decrypt``.
+
+Managing external dependencies for chaincode written in Go
+----------------------------------------------------------
+If your chaincode requires packages not provided by the Go standard library, you will need
+to include those packages with your chaincode.  There are `many tools available <https://github.com/golang/go/wiki/PackageManagementTools>`__
+for managing (or "vendoring") these dependencies.  The following demonstrates how to use
+``govendor``:
+
+.. code:: bash
+
+  govendor init
+  govendor add +external  // Add all external package, or
+  govendor add github.com/external/pkg // Add specific external package
+
+This imports the external dependencies into a local ``vendor`` directory. ``peer chaincode package``
+and ``peer chaincode install`` operations will then include code associated with the
+dependencies into the chaincode package.
 
 .. Licensed under Creative Commons Attribution 4.0 International License
    https://creativecommons.org/licenses/by/4.0/

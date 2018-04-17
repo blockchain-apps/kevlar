@@ -167,7 +167,6 @@ class Composition:
                     raise Exception(_error)
         except:
             err = "Error occurred {0}: {1}".format(cmd, sys.exc_info()[1])
-            #print(err)
             output = err
 
         # Don't rebuild if ps command
@@ -179,7 +178,13 @@ class Composition:
         self.containerDataList = []
         for containerID in self.refreshContainerIDs():
             # get container metadata
-            container = json.loads(str(subprocess.check_output(["docker", "inspect", containerID])))[0]
+            cmd = ["docker", "inspect", containerID]
+            try:
+                output = subprocess.check_output(cmd)
+            except:
+                err = "Error occurred {0}: {1}".format(cmd, sys.exc_info()[1])
+                continue
+            container = json.loads(str(output))[0]
             # container name
             container_name = container['Name'][1:]
             # container ip address (only if container is running)
@@ -204,8 +209,6 @@ class Composition:
         self.issueCommand(["rm", "-f"])
         env = self.getEnv()
 
-        print("Current env:", env)
-
         # Now remove associated chaincode containers if any
         cmd = ["docker", "ps", "-qa", "--filter", "name={0}".format(self.projectName)]
         output = str(subprocess.check_output(cmd, env=env))
@@ -213,3 +216,7 @@ class Composition:
         for container in container_list:
             if container != '':
                 subprocess.call(['docker', 'rm', '-f', container], env=env)
+
+        # Need to remove the chaincode images: docker rmi -f $(docker images | grep "example.com-" | awk '{print $3}')
+        cmd = ['docker images | grep ".example.com-" | awk \'{print $3}\' | xargs docker rmi']
+        subprocess.call(cmd, shell=True, env=env)

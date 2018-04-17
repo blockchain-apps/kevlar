@@ -169,7 +169,8 @@ func (historyDB *historyDB) Commit(block *common.Block) error {
 	dbBatch.Put(savePointKey, height.ToBytes())
 
 	// write the block's history records and savepoint to LevelDB
-	if err := historyDB.db.WriteBatch(dbBatch, false); err != nil {
+	// Setting snyc to true as a precaution, false may be an ok optimization after further testing.
+	if err := historyDB.db.WriteBatch(dbBatch, true); err != nil {
 		return err
 	}
 
@@ -208,7 +209,8 @@ func (historyDB *historyDB) ShouldRecover(lastAvailableBlock uint64) (bool, uint
 }
 
 // CommitLostBlock implements method in interface kvledger.Recoverer
-func (historyDB *historyDB) CommitLostBlock(block *common.Block) error {
+func (historyDB *historyDB) CommitLostBlock(blockAndPvtdata *ledger.BlockAndPvtData) error {
+	block := blockAndPvtdata.Block
 	if err := historyDB.Commit(block); err != nil {
 		return err
 	}

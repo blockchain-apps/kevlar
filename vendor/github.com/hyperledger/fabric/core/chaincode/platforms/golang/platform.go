@@ -22,6 +22,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -30,9 +31,12 @@ import (
 
 	"sort"
 
+	"github.com/hyperledger/fabric/common/metadata"
 	"github.com/hyperledger/fabric/core/chaincode/platforms/util"
+	ccmetadata "github.com/hyperledger/fabric/core/common/ccprovider/metadata"
 	cutil "github.com/hyperledger/fabric/core/container/util"
 	pb "github.com/hyperledger/fabric/protos/peer"
+	"github.com/spf13/viper"
 )
 
 // Platform for chaincodes written in Go
@@ -102,7 +106,7 @@ func (goPlatform *Platform) ValidateSpec(spec *pb.ChaincodeSpec) error {
 		return fmt.Errorf("invalid path: %s", err)
 	}
 
-	//we have no real good way of checking existence of remote urls except by downloading and testin
+	//we have no real good way of checking existence of remote urls except by downloading and testing
 	//which we do later anyway. But we *can* - and *should* - test for existence of local paths.
 	//Treat empty scheme as a local filesystem path
 	if path.Scheme == "" {
@@ -116,7 +120,7 @@ func (goPlatform *Platform) ValidateSpec(spec *pb.ChaincodeSpec) error {
 			return fmt.Errorf("error validating chaincode path: %s", err)
 		}
 		if !exists {
-			return fmt.Errorf("path to chaincode does not exist: %s", spec.ChaincodeId.Path)
+			return fmt.Errorf("path to chaincode does not exist: %s", pathToCheck)
 		}
 	}
 	return nil
@@ -178,6 +182,74 @@ func (goPlatform *Platform) ValidateDeploymentSpec(cds *pb.ChaincodeDeploymentSp
 	return nil
 }
 
+// Vendor any packages that are not already within our chaincode's primary package
+// or vendored by it.  We take the name of the primary package and a list of files
+// that have been previously determined to comprise the package's dependencies.
+// For anything that needs to be vendored, we simply update its path specification.
+// Everything else, we pass through untouched.
+func vendorDependencies(pkg string, files Sources) {
+
+	exclusions := make([]string, 0)
+	elements := strings.Split(pkg, "/")
+
+	// --------------------------------------------------------------------------------------
+	// First, add anything already vendored somewhere within our primary package to the
+	// "exclusions".  For a package "foo/bar/baz", we want to ensure we don't auto-vendor
+	// any of the following:
+	//
+	//     [ "foo/vendor", "foo/bar/vendor", "foo/bar/baz/vendor"]
+	//
+	// and we therefore employ a recursive path building process to form this list
+	// --------------------------------------------------------------------------------------
+	prev := filepath.Join("src")
+	for _, element := range elements {
+		curr := filepath.Join(prev, element)
+		vendor := filepath.Join(curr, "vendor")
+		exclusions = append(exclusions, vendor)
+		prev = curr
+	}
+
+	// --------------------------------------------------------------------------------------
+	// Next add our primary package to the list of "exclusions"
+	// --------------------------------------------------------------------------------------
+	exclusions = append(exclusions, filepath.Join("src", pkg))
+
+	count := len(files)
+	sem := make(chan bool, count)
+
+	// --------------------------------------------------------------------------------------
+	// Now start a parallel process which checks each file in files to see if it matches
+	// any of the excluded patterns.  Any that match are renamed such that they are vendored
+	// under src/$pkg/vendor.
+	// --------------------------------------------------------------------------------------
+	vendorPath := filepath.Join("src", pkg, "vendor")
+	for i, file := range files {
+		go func(i int, file SourceDescriptor) {
+			excluded := false
+
+			for _, exclusion := range exclusions {
+				if strings.HasPrefix(file.Name, exclusion) == true {
+					excluded = true
+					break
+				}
+			}
+
+			if excluded == false {
+				origName := file.Name
+				file.Name = strings.Replace(origName, "src", vendorPath, 1)
+				logger.Debugf("vendoring %s -> %s", origName, file.Name)
+			}
+
+			files[i] = file
+			sem <- true
+		}(i, file)
+	}
+
+	for i := 0; i < count; i++ {
+		<-sem
+	}
+}
+
 // Generates a deployment payload for GOLANG as a series of src/$pkg entries in .tar.gz format
 func (goPlatform *Platform) GetDeploymentPayload(spec *pb.ChaincodeSpec) ([]byte, error) {
 
@@ -222,10 +294,21 @@ func (goPlatform *Platform) GetDeploymentPayload(spec *pb.ChaincodeSpec) ([]byte
 		"github.com/hyperledger/fabric/protos/peer":         true,
 	}
 
+	// Golang "pseudo-packages" - packages which don't actually exist
+	var pseudo = map[string]bool{
+		"C": true,
+	}
+
 	imports = filter(imports, func(pkg string) bool {
 		// Drop if provided by CCENV
 		if _, ok := provided[pkg]; ok == true {
 			logger.Debugf("Discarding provided package %s", pkg)
+			return false
+		}
+
+		// Drop pseudo-packages
+		if _, ok := pseudo[pkg]; ok == true {
+			logger.Debugf("Discarding pseudo-package %s", pkg)
 			return false
 		}
 
@@ -320,30 +403,21 @@ func (goPlatform *Platform) GetDeploymentPayload(spec *pb.ChaincodeSpec) ([]byte
 	logger.Debugf("done")
 
 	// --------------------------------------------------------------------------------------
-	// Reclassify and sort the files:
-	//
-	// Two goals:
-	//   * Remap non-package dependencies to package/vendor
-	//   * Sort the final filename so the tarball at least looks sane in terms of package grouping
+	// Reprocess into a list for easier handling going forward
 	// --------------------------------------------------------------------------------------
 	files := make(Sources, 0)
-	pkgPath := filepath.Join("src", code.Pkg)
-	vendorPath := filepath.Join(pkgPath, "vendor")
 	for _, file := range fileMap {
-		// Vendor any packages that are not already within our chaincode's primary package.  We
-		// detect this by checking the path-prefix.  Anything that is prefixed by "src/$pkg"
-		// (which includes the package itself and anything explicitly vendored in "src/$pkg/vendor")
-		// are left unperturbed.  Everything else is implicitly vendored under src/$pkg/vendor by
-		// simply remapping "src" -> "src/$pkg/vendor" in the tarball index.
-		if strings.HasPrefix(file.Name, pkgPath) == false {
-			origName := file.Name
-			file.Name = strings.Replace(origName, "src", vendorPath, 1)
-			logger.Debugf("vendoring %s -> %s", origName, file.Name)
-		}
-
 		files = append(files, file)
 	}
 
+	// --------------------------------------------------------------------------------------
+	// Remap non-package dependencies to package/vendor
+	// --------------------------------------------------------------------------------------
+	vendorDependencies(code.Pkg, files)
+
+	// --------------------------------------------------------------------------------------
+	// Sort on the filename so the tarball at least looks sane in terms of package grouping
+	// --------------------------------------------------------------------------------------
 	sort.Sort(files)
 
 	// --------------------------------------------------------------------------------------
@@ -354,6 +428,44 @@ func (goPlatform *Platform) GetDeploymentPayload(spec *pb.ChaincodeSpec) ([]byte
 	tw := tar.NewWriter(gw)
 
 	for _, file := range files {
+
+		// file.Path represents os localpath
+		// file.Name represents tar packagepath
+
+		// If the file is metadata rather than golang code, remove the leading go code path, for example:
+		// original file.Name:  src/github.com/hyperledger/fabric/examples/chaincode/go/marbles02/META-INF/statedb/couchdb/indexes/indexOwner.json
+		// updated file.Name:   META-INF/statedb/couchdb/indexes/indexOwner.json
+		if file.IsMetadata {
+
+			file.Name, err = filepath.Rel(filepath.Join("src", code.Pkg), file.Name)
+			if err != nil {
+				return nil, fmt.Errorf("This error was caused by bad packaging of the metadata.  The file [%s] is marked as MetaFile, however not located under META-INF   Error:[%s]", file.Name, err)
+			}
+
+			// Split the tar location (file.Name) into a tar package directory and filename
+			packageDir, filename := filepath.Split(file.Name)
+
+			// Hidden files are not supported as metadata, therefore ignore them.
+			// User often doesn't know that hidden files are there, and may not be able to delete them, therefore warn user rather than error out.
+			if strings.HasPrefix(filename, ".") {
+				logger.Warningf("Ignoring hidden file in metadata directory: %s", file.Name)
+				continue
+			}
+
+			fileBytes, err := ioutil.ReadFile(file.Path)
+			if err != nil {
+				return nil, err
+			}
+
+			// Validate metadata file for inclusion in tar
+			// Validation is based on the passed metadata directory, e.g. META-INF/statedb/couchdb/indexes
+			// Clean metadata directory to remove trailing slash
+			err = ccmetadata.ValidateMetadataFile(filename, fileBytes, filepath.Clean(packageDir))
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		err = cutil.WriteFileToPackage(file.Path, file.Name, tw)
 		if err != nil {
 			return nil, fmt.Errorf("Error writing %s to tar: %s", file.Name, err)
@@ -378,6 +490,16 @@ func (goPlatform *Platform) GenerateDockerfile(cds *pb.ChaincodeDeploymentSpec) 
 	return dockerFileContents, nil
 }
 
+const staticLDFlagsOpts = "-ldflags \"-linkmode external -extldflags '-static'\""
+const dynamicLDFlagsOpts = ""
+
+func getLDFlagsOpts() string {
+	if viper.GetBool("chaincode.golang.dynamicLink") {
+		return dynamicLDFlagsOpts
+	}
+	return staticLDFlagsOpts
+}
+
 func (goPlatform *Platform) GenerateDockerBuild(cds *pb.ChaincodeDeploymentSpec, tw *tar.Writer) error {
 	spec := cds.ChaincodeSpec
 
@@ -386,12 +508,20 @@ func (goPlatform *Platform) GenerateDockerBuild(cds *pb.ChaincodeDeploymentSpec,
 		return fmt.Errorf("could not decode url: %s", err)
 	}
 
-	const ldflags = "-linkmode external -extldflags '-static'"
+	ldflagsOpt := getLDFlagsOpts()
+	logger.Infof("building chaincode with ldflagsOpt: '%s'", ldflagsOpt)
+
+	var gotags string
+	// check if experimental features are enabled
+	if metadata.Experimental == "true" {
+		gotags = " experimental"
+	}
+	logger.Infof("building chaincode with tags: %s", gotags)
 
 	codepackage := bytes.NewReader(cds.CodePackage)
 	binpackage := bytes.NewBuffer(nil)
 	err = util.DockerBuild(util.DockerBuildOptions{
-		Cmd:          fmt.Sprintf("GOPATH=/chaincode/input:$GOPATH go build -ldflags \"%s\" -o /chaincode/output/chaincode %s", ldflags, pkgname),
+		Cmd:          fmt.Sprintf("GOPATH=/chaincode/input:$GOPATH go build -tags \"%s\" %s -o /chaincode/output/chaincode %s", gotags, ldflagsOpt, pkgname),
 		InputStream:  codepackage,
 		OutputStream: binpackage,
 	})

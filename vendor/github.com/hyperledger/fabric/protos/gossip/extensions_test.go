@@ -72,6 +72,10 @@ func TestToString(t *testing.T) {
 		},
 	}
 	assert.NotContains(t, fmt.Sprintf("%v", sMsg), "2")
+	sMsg.GetDataMsg().Payload = nil
+	assert.NotPanics(t, func() {
+		_ = sMsg.String()
+	})
 
 	sMsg = &SignedGossipMessage{
 		GossipMessage: &GossipMessage{
@@ -432,7 +436,7 @@ func TestCheckGossipMessageTypes(t *testing.T) {
 	// Create state response message
 	msg = signedGossipMessage(channelID, GossipMessage_EMPTY, &GossipMessage_StateResponse{
 		StateResponse: &RemoteStateResponse{
-			Payloads: []*Payload{&Payload{
+			Payloads: []*Payload{{
 				SeqNum: 1,
 				Data:   []byte{1, 2, 3, 4, 5},
 			}},
@@ -667,21 +671,6 @@ func TestGossipMessageLeadershipMessageTagType(t *testing.T) {
 
 	msg = signedGossipMessage(channelID, GossipMessage_CHAN_OR_ORG, &GossipMessage_Empty{})
 	assert.Error(t, msg.IsTagLegal())
-}
-
-func TestConnectionInfo_IsAuthenticated(t *testing.T) {
-	connInfo := &ConnectionInfo{
-		ID: common.PKIidType("peerID"),
-	}
-
-	assert.False(t, connInfo.IsAuthenticated())
-
-	connInfo = &ConnectionInfo{
-		ID:   common.PKIidType("peerID"),
-		Auth: &AuthInfo{},
-	}
-
-	assert.True(t, connInfo.IsAuthenticated())
 }
 
 func TestGossipMessageSign(t *testing.T) {

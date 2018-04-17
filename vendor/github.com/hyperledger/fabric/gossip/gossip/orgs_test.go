@@ -1,17 +1,7 @@
 /*
-Copyright IBM Corp. 2017 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-                 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package gossip
@@ -28,7 +18,6 @@ import (
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/discovery"
-	"github.com/hyperledger/fabric/gossip/identity"
 	"github.com/hyperledger/fabric/gossip/util"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/stretchr/testify/assert"
@@ -46,6 +35,10 @@ func init() {
 
 type configurableCryptoService struct {
 	m map[string]api.OrgIdentityType
+}
+
+func (c *configurableCryptoService) Expiration(peerIdentity api.PeerIdentityType) (time.Time, error) {
+	return time.Now().Add(time.Hour), nil
 }
 
 func (c *configurableCryptoService) putInOrg(port int, org string) {
@@ -119,9 +112,8 @@ func newGossipInstanceWithExternalEndpoint(portPrefix int, id int, mcs *configur
 		PublishStateInfoInterval:   time.Duration(1) * time.Second,
 		RequestStateInfoInterval:   time.Duration(1) * time.Second,
 	}
-	selfId := api.PeerIdentityType(conf.InternalEndpoint)
-	idMapper := identity.NewIdentityMapper(mcs, selfId)
-	g := NewGossipServiceWithServer(conf, mcs, mcs, idMapper, selfId,
+	selfID := api.PeerIdentityType(conf.InternalEndpoint)
+	g := NewGossipServiceWithServer(conf, mcs, mcs, selfID,
 		nil)
 
 	return g
@@ -129,6 +121,7 @@ func newGossipInstanceWithExternalEndpoint(portPrefix int, id int, mcs *configur
 
 func TestMultipleOrgEndpointLeakage(t *testing.T) {
 	t.Parallel()
+	defer testWG.Done()
 	// Scenario: create 2 organizations, each with 5 peers.
 	// The first org will have an anchor peer, but the second won't.
 	// The first 2 peers of each org would have an external endpoint, the rest won't.
@@ -214,7 +207,7 @@ func TestMultipleOrgEndpointLeakage(t *testing.T) {
 	for _, peers := range orgs2Peers {
 		for _, p := range peers {
 			p.JoinChan(jcm, channel)
-			p.UpdateChannelMetadata([]byte("bla"), channel)
+			p.UpdateChannelMetadata(createMetadata(1), channel)
 		}
 	}
 
@@ -263,6 +256,7 @@ func TestMultipleOrgEndpointLeakage(t *testing.T) {
 
 func TestConfidentiality(t *testing.T) {
 	t.Parallel()
+	defer testWG.Done()
 	// Scenario: create 4 organizations: {A, B, C, D}, each with 3 peers.
 	// Make only the first 2 peers have an external endpoint.
 	// Also, add the peers to the following channels:
@@ -404,11 +398,11 @@ func TestConfidentiality(t *testing.T) {
 			if isOrgInChan(org, ch) {
 				for _, p := range peers {
 					p.JoinChan(joinChanMsgsByChan[ch], common.ChainID(ch))
-					p.UpdateChannelMetadata([]byte{}, common.ChainID(ch))
+					p.UpdateChannelMetadata(createMetadata(1), common.ChainID(ch))
 					go func(p Gossip) {
 						for i := 0; i < 5; i++ {
 							time.Sleep(time.Second)
-							p.UpdateChannelMetadata([]byte{}, common.ChainID(ch))
+							p.UpdateChannelMetadata(createMetadata(1), common.ChainID(ch))
 						}
 					}(p)
 				}

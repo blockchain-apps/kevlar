@@ -6,7 +6,7 @@ and scalability by dividing workload across transaction execution
 (endorsing and committing) peers and transaction ordering nodes. This
 decoupling of network operations requires a secure, reliable and
 scalable data dissemination protocol to ensure data integrity and
-consistency. To meet these requirements, the fabric implements a
+consistency. To meet these requirements, Hyperledger Fabric implements a
 **gossip data dissemination protocol**.
 
 Gossip protocol
@@ -23,7 +23,7 @@ synced up to the current ledger state by contacting peers in possession of these
 missing blocks.
 
 The gossip-based data dissemination protocol performs three primary functions on
-a Fabric network:
+a Hyperledger Fabric network:
 
 1. Manages peer discovery and channel membership, by continually
    identifying available member peers, and eventually detecting peers that have
@@ -42,6 +42,107 @@ delivery of a message.  This cycle repeats, with the result of channel
 membership, ledger and state information continually being kept current and in
 sync. For dissemination of new blocks, the **leader** peer on the channel pulls
 the data from the ordering service and initiates gossip dissemination to peers.
+
+Leader election
+---------------
+
+The leader election mechanism is used to **elect** one peer per each organization
+which will maintain connection with ordering service and initiate distribution of
+newly arrived blocks across peers of its own organization. Leveraging leader election
+provides system with ability to efficiently utilize bandwidth of the ordering
+service. There are two possible operation modes for leader election module:
+
+1. **Static** - system administrator manually configures one peer in the organization
+   to be the leader, e.g. one to maintain open connection with the ordering service.
+2. **Dynamic** - peers execute a leader election procedure to select one peer in an
+   organization to become leader, pull blocks from the ordering service, and disseminate
+   blocks to the other peers in the organization..
+
+Static leader election
+~~~~~~~~~~~~~~~~~~~~~~
+
+Using static leader election allows to manually define a set of leader peers within the organization, it's
+possible to define a single node to be a leader or all available peers, it should be taken into account that -
+making too many peers to connect to the ordering service might lead to inefficient bandwidth
+utilization. To enable static leader election mode, configure the following parameters
+within the section of ``core.yaml``:
+
+::
+
+    peer:
+        # Gossip related configuration
+        gossip:
+            useLeaderElection: false
+            orgLeader: true
+
+Alternatively these parameters could be configured and overrided with environmental variables:
+
+::
+
+    export CORE_PEER_GOSSIP_USELEADERELECTION=false
+    export CORE_PEER_GOSSIP_ORGLEADER=true
+
+
+| **Note:**
+
+1. Following configuration will keep peer in **stand-by** mode, i.e. peer will not try
+   to become a leader:
+::
+
+    export CORE_PEER_GOSSIP_USELEADERELECTION=false
+    export CORE_PEER_GOSSIP_ORGLEADER=false
+
+2. Setting ``CORE_PEER_GOSSIP_USELEADERELECTION`` and ``CORE_PEER_GOSSIP_USELEADERELECTION``
+   with ``true`` value is ambiguous and will lead to an error.
+3. In static configuration organization admin is responsible to provide high availability
+   of the leader node in case for failure or crashes.
+
+
+Dynamic leader election
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Dynamic leader election enables organization peers to **elect** one peer which will
+connect to the ordering service and pull out new blocks. Leader is elected for set
+of peers for each organization independently.
+
+Elected leader is responsible to send the **heartbeat** messages to the rest of the peers
+as an evidence of liveness. If one or more peers won't get **heartbeats** updates during
+period of time, they will initiate a new round of leader election procedure, eventually
+selecting a new leader. In case of a network partition in the worst case
+there will be more than one active leader for organization thus to guarantee resiliency
+and availability allowing the organization's peers to continue making progress. After
+the network partition is healed one of the leaders will relinquish its leadership, therefore in
+steady state and in no presence of network partitions for each organization there will be **only**
+one active leader connecting to the ordering service.
+
+Following configuration controls frequency of the leader **heartbeat** messages:
+
+::
+
+    peer:
+        # Gossip related configuration
+        gossip:
+            election:
+                leaderAliveThreshold: 10s
+
+In order to enable dynamic leader election, the following parameters need to be configured
+within ``core.yaml``:
+
+::
+
+    peer:
+        # Gossip related configuration
+        gossip:
+            useLeaderElection: true
+            orgLeader: false
+
+Alternatively these parameters could be configured and overrided with environmental variables:
+
+::
+
+    export CORE_PEER_GOSSIP_USELEADERELECTION=true
+    export CORE_PEER_GOSSIP_ORGLEADER=false
+
 
 Gossip messaging
 ----------------
@@ -77,7 +178,7 @@ on peers' channel subscriptions.
   are signed by the ordering service, and then delivered to the leader peers on a channel.
   2. Authentication is governed by the membership service provider for the
   peer. When the peer connects to the channel for the first time, the
-  TLS session binds with fabric membership identity. This essentially
+  TLS session binds with the membership identity. This essentially
   authenticates each peer to the connecting peer, with respect to
   membership in the network and channel.
 

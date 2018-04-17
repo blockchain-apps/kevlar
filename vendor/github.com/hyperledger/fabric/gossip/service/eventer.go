@@ -1,17 +1,7 @@
 /*
-Copyright IBM Corp. 2017 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-                 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package service
@@ -19,7 +9,7 @@ package service
 import (
 	"reflect"
 
-	"github.com/hyperledger/fabric/common/config"
+	"github.com/hyperledger/fabric/common/channelconfig"
 
 	"github.com/hyperledger/fabric/protos/peer"
 )
@@ -30,10 +20,13 @@ type Config interface {
 	ChainID() string
 
 	// Organizations returns a map of org ID to ApplicationOrgConfig
-	Organizations() map[string]config.ApplicationOrg
+	Organizations() map[string]channelconfig.ApplicationOrg
 
 	// Sequence should return the sequence number of the current configuration
 	Sequence() uint64
+
+	// OrdererAddresses returns the list of valid orderer addresses to connect to to invoke Broadcast/Deliver
+	OrdererAddresses() []string
 }
 
 // ConfigProcessor receives config updates
@@ -44,11 +37,12 @@ type ConfigProcessor interface {
 
 type configStore struct {
 	anchorPeers []*peer.AnchorPeer
-	orgMap      map[string]config.ApplicationOrg
+	orgMap      map[string]channelconfig.ApplicationOrg
 }
 
 type configEventReceiver interface {
-	configUpdated(config Config)
+	updateAnchors(config Config)
+	updateEndpoints(chainID string, endpoints []string)
 }
 
 type configEventer struct {
@@ -62,7 +56,7 @@ func newConfigEventer(receiver configEventReceiver) *configEventer {
 	}
 }
 
-// ProcessConfigUpdate should be invoked whenever a channel's configuration is intialized or updated
+// ProcessConfigUpdate should be invoked whenever a channel's configuration is initialized or updated
 // it invokes the associated method in configEventReceiver when configuration is updated
 // but only if the configuration value actually changed
 // Note, that a changing sequence number is ignored as changing configuration
@@ -71,26 +65,27 @@ func (ce *configEventer) ProcessConfigUpdate(config Config) {
 	orgMap := cloneOrgConfig(config.Organizations())
 	if ce.lastConfig != nil && reflect.DeepEqual(ce.lastConfig.orgMap, orgMap) {
 		logger.Debugf("Ignoring new config for channel %s because it contained no anchor peer updates", config.ChainID())
-		return
-	}
+	} else {
 
-	var newAnchorPeers []*peer.AnchorPeer
-	for _, group := range config.Organizations() {
-		newAnchorPeers = append(newAnchorPeers, group.AnchorPeers()...)
-	}
+		var newAnchorPeers []*peer.AnchorPeer
+		for _, group := range config.Organizations() {
+			newAnchorPeers = append(newAnchorPeers, group.AnchorPeers()...)
+		}
 
-	newConfig := &configStore{
-		orgMap:      orgMap,
-		anchorPeers: newAnchorPeers,
-	}
-	ce.lastConfig = newConfig
+		newConfig := &configStore{
+			orgMap:      orgMap,
+			anchorPeers: newAnchorPeers,
+		}
+		ce.lastConfig = newConfig
 
-	logger.Debugf("Calling out because config was updated for channel %s", config.ChainID())
-	ce.receiver.configUpdated(config)
+		logger.Debugf("Calling out because config was updated for channel %s", config.ChainID())
+		ce.receiver.updateAnchors(config)
+	}
+	ce.receiver.updateEndpoints(config.ChainID(), config.OrdererAddresses())
 }
 
-func cloneOrgConfig(src map[string]config.ApplicationOrg) map[string]config.ApplicationOrg {
-	clone := make(map[string]config.ApplicationOrg)
+func cloneOrgConfig(src map[string]channelconfig.ApplicationOrg) map[string]channelconfig.ApplicationOrg {
+	clone := make(map[string]channelconfig.ApplicationOrg)
 	for k, v := range src {
 		clone[k] = &appGrp{
 			name:        v.Name(),

@@ -55,7 +55,6 @@ type MockCCComm struct {
 	name        string
 	bailOnError bool
 	keepAlive   *pb.ChaincodeMessage
-	sendOnRecv  *pb.ChaincodeMessage
 	recvStream  chan *pb.ChaincodeMessage
 	sendStream  chan *pb.ChaincodeMessage
 	respIndex   int
@@ -155,6 +154,11 @@ func (s *MockCCComm) Run() error {
 
 	for {
 		msg, err := s.Recv()
+
+		//stream could just be closed
+		if msg == nil {
+			return err
+		}
 
 		if err != nil {
 			return err

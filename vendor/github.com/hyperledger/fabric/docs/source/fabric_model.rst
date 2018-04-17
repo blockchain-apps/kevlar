@@ -19,7 +19,7 @@ fulfill its promise of a comprehensive, yet customizable, enterprise blockchain 
 * :ref:`Security-Membership-Services` - Permissioned membership provides a
   trusted blockchain network, where participants know that all transactions can
   be detected and traced by authorized regulators and auditors.
-* :ref:`Consensus` - Fabric's unique approach to consensus enables the
+* :ref:`Consensus` - a unique approach to consensus enables the
   flexibility and scalability needed for the enterprise.
 
 .. _Assets:
@@ -28,15 +28,15 @@ Assets
 ------
 
 Assets can range from the tangible (real estate and hardware) to the intangible
-(contracts and intellectual property).  You can easily define Assets in client-side
-javascript and use them in your Fabric application using the included
-`Fabric Composer <https://github.com/fabric-composer/fabric-composer>`__ tool.
+(contracts and intellectual property).  Hyperledger Fabric provides the
+ability to modify assets using chaincode transactions.
 
-Fabric supports the ability to exchange assets using unspent transaction outputs
-as the inputs for subsequent transactions.  Assets (and asset registries) live
-in Fabric as a collection of key-value pairs, with state changes recorded as transactions
-on a :ref:`Channel` ledger.  Fabric allows for any asset
-to be represented in binary or JSON format.
+Assets are represented in Hyperledger Fabric as a collection of
+key-value pairs, with state changes recorded as transactions on a :ref:`Channel`
+ledger.  Assets can be represented in binary and/or JSON form.
+
+You can easily define and use assets in your Hyperledger Fabric applications
+using the `Hyperledger Composer <https://github.com/hyperledger/composer>`__ tool.
 
 .. _Chaincode:
 
@@ -46,7 +46,7 @@ Chaincode
 Chaincode is software defining an asset or assets, and the transaction instructions for
 modifying the asset(s).  In other words, it's the business logic.  Chaincode enforces the rules for reading
 or altering key value pairs or other state database information. Chaincode functions execute against
-the ledger current state database and are initiated through a transaction proposal. Chaincode execution
+the ledger's current state database and are initiated through a transaction proposal. Chaincode execution
 results in a set of key value writes (write set) that can be submitted to the network and applied to
 the ledger on all peers.
 
@@ -83,20 +83,25 @@ See the :doc:`ledger` topic for a deeper dive on the databases, storage structur
 Privacy through Channels
 ------------------------
 
-Fabric employs an immutable ledger on a per-channel basis, as well as
+Hyperledger Fabric employs an immutable ledger on a per-channel basis, as well as
 chaincodes that can manipulate and modify the current state of assets (i.e. update
 key value pairs).  A ledger exists in the scope of a channel - it can be shared
 across the entire network (assuming every participant is operating on one common
 channel) - or it can be privatized to only include a specific set of participants.
 
 In the latter scenario, these participants would create a separate channel and
-thereby isolate/segregate their transactions and ledger.  Fabric even solves
-scenarios that want to bridge the gap between total transparency and privacy.
-Chaincode gets installed only on peers that need to access the asset states
+thereby isolate/segregate their transactions and ledger.  In order to solve
+scenarios that want to bridge the gap between total transparency and privacy,
+chaincode can be installed only on peers that need to access the asset states
 to perform reads and writes (in other words, if a chaincode is not installed on
-a peer, it will not be able to properly interface with the ledger).  To further
-obfuscate the data, values within chaincode can be encrypted (in part or in total) using common
-cryptographic algorithms such as SHA-256 before appending to the ledger.
+a peer, it will not be able to properly interface with the ledger).
+
+To further obfuscate the data, values within chaincode can be encrypted
+(in part or in total) using common cryptographic algorithms such as AES before
+sending transactions to the ordering service and appending blocks to the ledger.
+Once encrypted data has been written to the ledger, it can only be decrypted by
+a user in possession of the corresponding key that was used to generate the cipher text.  
+For further details on chaincode encryption, see the :doc:`chaincode4ade` topic.
 
 .. _Security-Membership-Services:
 
@@ -108,11 +113,12 @@ known identities.  Public Key Infrastructure is used to generate cryptographic
 certificates which are tied to organizations, network components, and end users
 or client applications.  As a result, data access control can be manipulated and
 governed on the broader network and on channel levels.  This "permissioned" notion
-of Fabric, coupled with the existence and capabilities of channels, helps address
-scenarios where privacy and confidentiality are paramount concerns.
+of Hyperledger Fabric, coupled with the existence and capabilities of channels,
+helps address scenarios where privacy and confidentiality are paramount concerns.
 
-See the :doc:`Fabric CA <Setup/ca-setup>` section to better understand cryptographic
-implementations, and the sign, verify, authenticate approach used in Fabric.
+See the :doc:`msp` topic to better understand cryptographic
+implementations, and the sign, verify, authenticate approach used in
+Hyperledger Fabric.
 
 .. _Consensus:
 

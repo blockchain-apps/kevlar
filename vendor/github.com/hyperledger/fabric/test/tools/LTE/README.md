@@ -1,6 +1,6 @@
 # Ledger Traffic Engine
 
-This readme explains the working and the usage of Ledger Traffic Engine (LTE
+This readme explains the working and the usage of Ledger Traffic Engine (LTE)
 test tool.
 
 
@@ -21,21 +21,24 @@ considered to constitute a single test-run.
 
 ## How to Run The tests
 
-To run all the available tests with default parameters, run:
+To run all the available tests, run:
 ```
 cd fabric/test/tools/LTE/scripts
-./runbenchmark.sh all
+./runbenchmarks.sh -f parameters_daily_CI.sh all
 ```
-you can run individual tests without running all the available tests by giving
+where the file `parameters_daily_CI.sh` has all the necessary test parameters.
+
+
+You can run individual tests without running all the available tests by giving
 the name of the test as parameter, instead of `all`. You can get the available
 test names by:
 ```
-./runbenchmark.sh help
+./runbenchmarks.sh help
 ```
 
 ### What the Tests Do
 
-Each test reads test parameters from the file `parameters_daily_CI.sh` and
+Each test reads test parameters from the provided parameter file and
 conducts several test-runs by varying one or two of the parameters. The
 parameters are:
 * number of chains (ledger),
@@ -95,8 +98,35 @@ transactions on chain_2 in parallel In each of the transactions executed by any
 client, the transaction expects and modifies any key(s) between Key_1 to key_50
 (because, total keys are to be 100 across two chains).
 
+### Running with Custom Parameters
+
+The tests can be run with user-defined parameters by creating a new file that
+has all the necessary parameters to run and using that file as the input (see
+the section on how to run the tests) . The names of necessary parameters can be
+found in the file `parameters_daily_CI.sh`.
+
+### Running with optional CouchDB
+
+By default, the tests use golveldb as the state database. Fabric provides the
+option of using CouchDB as a pluggable state database. To run the existing
+tests with CouchDB, use the parameter file `parameters_couchdb_daily_CI.sh`:
+```
+./runbenchmarks.sh -f parameters_couchdb_daily_CI.sh all
+```
+Note that this parameter file (`parameters_couchdb_daily_CI.sh`) contains the
+following line, which is required to run the tests with CouchDB:
+```
+export useCouchDB="yes"
+```
+CouchDB can store values in JSON or binary formats. The following option in
+`parameters_couchdb_daily_CI.sh` is used to switch between JSON and binary
+values:
+```
+UseJSONFormat="true"
+```
+
 ## How to View the Test Results
 
 The test results can be viewed as in the stdout where it shows how long each
 single operation took to complete in a test. These results are also saved in a
-.csv file in the following directory: `/tmp/fabric/test/tools/LTE/results`
+.csv file in the following directory: `/tmp/experiments`

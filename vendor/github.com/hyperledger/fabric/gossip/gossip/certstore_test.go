@@ -1,17 +1,7 @@
 /*
-Copyright IBM Corp. 2016 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-		 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package gossip
@@ -64,6 +54,11 @@ func (s *sentMsg) GetSourceEnvelope() *proto.Envelope {
 	return nil
 }
 
+// Ack returns to the sender an acknowledgement for the message
+func (s *sentMsg) Ack(err error) {
+
+}
+
 func (s *sentMsg) Respond(msg *proto.GossipMessage) {
 	s.Called(msg)
 }
@@ -99,6 +94,7 @@ func TestCertStoreBadSignature(t *testing.T) {
 	}
 	pm, cs, _ := createObjects(badSignature, nil)
 	defer pm.Stop()
+	defer cs.stop()
 	testCertificateUpdate(t, false, cs)
 }
 
@@ -109,6 +105,7 @@ func TestCertStoreMismatchedIdentity(t *testing.T) {
 
 	pm, cs, _ := createObjects(mismatchedIdentity, nil)
 	defer pm.Stop()
+	defer cs.stop()
 	testCertificateUpdate(t, false, cs)
 }
 
@@ -119,17 +116,14 @@ func TestCertStoreShouldSucceed(t *testing.T) {
 
 	pm, cs, _ := createObjects(totallyFineIdentity, nil)
 	defer pm.Stop()
+	defer cs.stop()
 	testCertificateUpdate(t, true, cs)
 }
 
 func TestCertRevocation(t *testing.T) {
-	identityExpCheckInterval := identityExpirationCheckInterval
 	defer func() {
-		identityExpirationCheckInterval = identityExpCheckInterval
 		cs.revokedPkiIDS = map[string]struct{}{}
 	}()
-
-	identityExpirationCheckInterval = time.Second
 
 	totallyFineIdentity := func(nonce uint64) proto.ReceivedMessage {
 		return createUpdateMessage(nonce, createValidUpdateMessage())
@@ -140,6 +134,7 @@ func TestCertRevocation(t *testing.T) {
 	pm, cStore, sender := createObjects(totallyFineIdentity, func(message *proto.SignedGossipMessage) {
 		askedForIdentity <- struct{}{}
 	})
+	defer cStore.stop()
 	defer pm.Stop()
 	testCertificateUpdate(t, true, cStore)
 	// Should have asked for an identity for the first time
@@ -182,12 +177,12 @@ func TestCertRevocation(t *testing.T) {
 	select {
 	case <-time.After(time.Second * 5):
 	case <-askedForIdentity:
-		assert.Fail(t, "Shouldn't have asked for an identity, becase we already have it")
+		assert.Fail(t, "Shouldn't have asked for an identity, because we already have it")
 	}
 	assert.Len(t, askedForIdentity, 0)
 	// Revoke the identity
 	cs.revoke(common.PKIidType("B"))
-	cStore.listRevokedPeers(func(id api.PeerIdentityType) bool {
+	cStore.suspectPeers(func(id api.PeerIdentityType) bool {
 		return string(id) == "B"
 	})
 
@@ -225,11 +220,11 @@ func TestCertExpiration(t *testing.T) {
 	defer identity.SetIdentityUsageThreshold(idUsageThreshold)
 
 	// Backup original identityInactivityCheckInterval value
-	inactivityCheckInterval := identityInactivityCheckInterval
-	identityInactivityCheckInterval = time.Second * 1
+	usageThreshold := identity.GetIdentityUsageThreshold()
+	identity.SetIdentityUsageThreshold(time.Second)
 	// Restore original identityInactivityCheckInterval value
 	defer func() {
-		identityInactivityCheckInterval = inactivityCheckInterval
+		identity.SetIdentityUsageThreshold(usageThreshold)
 	}()
 
 	g1 := newGossipInstance(4321, 0, 0, 1)
@@ -298,7 +293,7 @@ func testCertificateUpdate(t *testing.T, shouldSucceed bool, certStore *certStor
 }
 
 func createMismatchedUpdateMessage() *proto.SignedGossipMessage {
-	identity := &proto.PeerIdentity{
+	peeridentity := &proto.PeerIdentity{
 		// This PKI-ID is different than the cert, and the mapping between
 		// certificate to PKI-ID in this test is simply the identity function.
 		PkiId: []byte("A"),
@@ -313,7 +308,7 @@ func createMismatchedUpdateMessage() *proto.SignedGossipMessage {
 		Nonce:   0,
 		Tag:     proto.GossipMessage_EMPTY,
 		Content: &proto.GossipMessage_PeerIdentity{
-			PeerIdentity: identity,
+			PeerIdentity: peeridentity,
 		},
 	}
 	sMsg := &proto.SignedGossipMessage{
@@ -324,7 +319,7 @@ func createMismatchedUpdateMessage() *proto.SignedGossipMessage {
 }
 
 func createBadlySignedUpdateMessage() *proto.SignedGossipMessage {
-	identity := &proto.PeerIdentity{
+	peeridentity := &proto.PeerIdentity{
 		PkiId: []byte("C"),
 		Cert:  []byte("C"),
 	}
@@ -338,7 +333,7 @@ func createBadlySignedUpdateMessage() *proto.SignedGossipMessage {
 		Nonce:   0,
 		Tag:     proto.GossipMessage_EMPTY,
 		Content: &proto.GossipMessage_PeerIdentity{
-			PeerIdentity: identity,
+			PeerIdentity: peeridentity,
 		},
 	}
 	sMsg := &proto.SignedGossipMessage{
@@ -355,7 +350,7 @@ func createBadlySignedUpdateMessage() *proto.SignedGossipMessage {
 }
 
 func createValidUpdateMessage() *proto.SignedGossipMessage {
-	identity := &proto.PeerIdentity{
+	peeridentity := &proto.PeerIdentity{
 		PkiId: []byte("B"),
 		Cert:  []byte("B"),
 	}
@@ -368,7 +363,7 @@ func createValidUpdateMessage() *proto.SignedGossipMessage {
 		Nonce:   0,
 		Tag:     proto.GossipMessage_EMPTY,
 		Content: &proto.GossipMessage_PeerIdentity{
-			PeerIdentity: identity,
+			PeerIdentity: peeridentity,
 		},
 	}
 	sMsg := &proto.SignedGossipMessage{
@@ -440,7 +435,9 @@ func createObjects(updateFactory func(uint64) proto.ReceivedMessage, msgCons pro
 	selfIdentity := api.PeerIdentityType("SELF")
 	certStore = newCertStore(&pullerMock{
 		Mediator: pullMediator,
-	}, identity.NewIdentityMapper(cs, selfIdentity), selfIdentity, cs)
+	}, identity.NewIdentityMapper(cs, selfIdentity, func(pkiID common.PKIidType, _ api.PeerIdentityType) {
+		pullMediator.Remove(string(pkiID))
+	}), selfIdentity, cs)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)

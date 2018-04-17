@@ -29,6 +29,7 @@ import (
 	"github.com/hyperledger/fabric/common/ledger/testutil"
 	"github.com/hyperledger/fabric/core/ledger/ledgerconfig"
 	ledgertestutil "github.com/hyperledger/fabric/core/ledger/testutil"
+	logging "github.com/op/go-logging"
 	"github.com/spf13/viper"
 )
 
@@ -82,6 +83,11 @@ func TestMain(m *testing.M) {
 	viper.Set("ledger.state.couchDBConfig.maxRetriesOnStartup", 10)
 	viper.Set("ledger.state.couchDBConfig.requestTimeout", time.Second*35)
 
+	//set the logging level to DEBUG to test debug only code
+	logging.SetLevel(logging.DEBUG, "couchdb")
+
+	viper.Set("logging.peer", "debug")
+
 	// Create CouchDB definition from config parameters
 	couchDBDef = GetCouchDBDefinition()
 
@@ -111,6 +117,25 @@ func TestDBBadConnectionDef(t *testing.T) {
 
 }
 
+func TestEncodePathElement(t *testing.T) {
+
+	encodedString := encodePathElement("testelement")
+	testutil.AssertEquals(t, encodedString, "testelement")
+
+	encodedString = encodePathElement("test element")
+	testutil.AssertEquals(t, encodedString, "test%20element")
+
+	encodedString = encodePathElement("/test element")
+	testutil.AssertEquals(t, encodedString, "%2Ftest%20element")
+
+	encodedString = encodePathElement("/test element:")
+	testutil.AssertEquals(t, encodedString, "%2Ftest%20element:")
+
+	encodedString = encodePathElement("/test+ element:")
+	testutil.AssertEquals(t, encodedString, "%2Ftest%2B%20element:")
+
+}
+
 func TestBadCouchDBInstance(t *testing.T) {
 
 	//TODO continue changes to return and removal of sprintf in followon changes
@@ -128,7 +153,7 @@ func TestBadCouchDBInstance(t *testing.T) {
 	badCouchDBInstance := CouchInstance{badConnectDef, client}
 
 	//Create a bad CouchDatabase
-	badDB := CouchDatabase{badCouchDBInstance, "baddb"}
+	badDB := CouchDatabase{badCouchDBInstance, "baddb", 1}
 
 	//Test CreateCouchDatabase with bad connection
 	_, err := CreateCouchDatabase(badCouchDBInstance, "baddbtest")
@@ -139,7 +164,7 @@ func TestBadCouchDBInstance(t *testing.T) {
 	testutil.AssertError(t, err, "Error should have been thrown with CreateSystemDatabasesIfNotExist and invalid connection")
 
 	//Test CreateDatabaseIfNotExist with bad connection
-	_, err = badDB.CreateDatabaseIfNotExist()
+	err = badDB.CreateDatabaseIfNotExist()
 	testutil.AssertError(t, err, "Error should have been thrown with CreateDatabaseIfNotExist and invalid connection")
 
 	//Test GetDatabaseInfo with bad connection
@@ -178,13 +203,25 @@ func TestBadCouchDBInstance(t *testing.T) {
 	_, err = badDB.QueryDocuments("1")
 	testutil.AssertError(t, err, "Error should have been thrown with QueryDocuments and invalid connection")
 
-	//Test BatchRetrieveIDRevision with bad connection
-	_, err = badDB.BatchRetrieveIDRevision(nil)
-	testutil.AssertError(t, err, "Error should have been thrown with BatchRetrieveIDRevision and invalid connection")
+	//Test BatchRetrieveDocumentMetadata with bad connection
+	_, err = badDB.BatchRetrieveDocumentMetadata(nil)
+	testutil.AssertError(t, err, "Error should have been thrown with BatchRetrieveDocumentMetadata and invalid connection")
 
 	//Test BatchUpdateDocuments with bad connection
 	_, err = badDB.BatchUpdateDocuments(nil)
 	testutil.AssertError(t, err, "Error should have been thrown with BatchUpdateDocuments and invalid connection")
+
+	//Test ListIndex with bad connection
+	_, err = badDB.ListIndex()
+	testutil.AssertError(t, err, "Error should have been thrown with ListIndex and invalid connection")
+
+	//Test CreateIndex with bad connection
+	_, err = badDB.CreateIndex("")
+	testutil.AssertError(t, err, "Error should have been thrown with CreateIndex and invalid connection")
+
+	//Test DeleteIndex with bad connection
+	err = badDB.DeleteIndex("", "")
+	testutil.AssertError(t, err, "Error should have been thrown with DeleteIndex and invalid connection")
 
 }
 
@@ -205,7 +242,7 @@ func TestDBCreateSaveWithoutRevision(t *testing.T) {
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Save the test document
@@ -232,7 +269,7 @@ func TestDBCreateEnsureFullCommit(t *testing.T) {
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Save the test document
@@ -297,7 +334,43 @@ func TestDBBadConnection(t *testing.T) {
 	}
 }
 
+func TestBadDBCredentials(t *testing.T) {
+
+	if ledgerconfig.IsCouchDBEnabled() {
+
+		database := "testdbbadcredentials"
+		err := cleanup(database)
+		testutil.AssertNoError(t, err, fmt.Sprintf("Error when trying to cleanup  Error: %s", err))
+		defer cleanup(database)
+
+		if err == nil {
+			//create a new instance and database object
+			_, err := CreateCouchInstance(couchDBDef.URL, "fred", "fred",
+				couchDBDef.MaxRetries, couchDBDef.MaxRetriesOnStartup, couchDBDef.RequestTimeout)
+			testutil.AssertError(t, err, fmt.Sprintf("Error should have been thrown for bad credentials"))
+
+		}
+
+	}
+
+}
 func TestDBCreateDatabaseAndPersist(t *testing.T) {
+
+	//Test create and persist with default configured maxRetries
+	testDBCreateDatabaseAndPersist(t, couchDBDef.MaxRetries)
+
+	//Test create and persist with 0 retries
+	testDBCreateDatabaseAndPersist(t, 0)
+
+	//Test batch operations with default configured maxRetries
+	testBatchBatchOperations(t, couchDBDef.MaxRetries)
+
+	//Test batch operations with 0 retries
+	testBatchBatchOperations(t, 0)
+
+}
+
+func testDBCreateDatabaseAndPersist(t *testing.T, maxRetries int) {
 
 	if ledgerconfig.IsCouchDBEnabled() {
 
@@ -309,12 +382,12 @@ func TestDBCreateDatabaseAndPersist(t *testing.T) {
 		if err == nil {
 			//create a new instance and database object
 			couchInstance, err := CreateCouchInstance(couchDBDef.URL, couchDBDef.Username, couchDBDef.Password,
-				couchDBDef.MaxRetries, couchDBDef.MaxRetriesOnStartup, couchDBDef.RequestTimeout)
+				maxRetries, couchDBDef.MaxRetriesOnStartup, couchDBDef.RequestTimeout)
 			testutil.AssertNoError(t, err, fmt.Sprintf("Error when trying to create couch instance"))
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Retrieve the info for the new database and make sure the name matches
@@ -377,11 +450,11 @@ func TestDBCreateDatabaseAndPersist(t *testing.T) {
 
 			testBytes2 := []byte(`test attachment 2`)
 
-			attachment2 := &Attachment{}
+			attachment2 := &AttachmentInfo{}
 			attachment2.AttachmentBytes = testBytes2
 			attachment2.ContentType = "application/octet-stream"
 			attachment2.Name = "data"
-			attachments2 := []*Attachment{}
+			attachments2 := []*AttachmentInfo{}
 			attachments2 = append(attachments2, attachment2)
 
 			//Save the test document with an attachment
@@ -398,11 +471,11 @@ func TestDBCreateDatabaseAndPersist(t *testing.T) {
 
 			testBytes3 := []byte{}
 
-			attachment3 := &Attachment{}
+			attachment3 := &AttachmentInfo{}
 			attachment3.AttachmentBytes = testBytes3
 			attachment3.ContentType = "application/octet-stream"
 			attachment3.Name = "data"
-			attachments3 := []*Attachment{}
+			attachments3 := []*AttachmentInfo{}
 			attachments3 = append(attachments3, attachment3)
 
 			//Save the test document with a zero length attachment
@@ -418,18 +491,18 @@ func TestDBCreateDatabaseAndPersist(t *testing.T) {
 			testutil.AssertEquals(t, testattach, testBytes3)
 
 			testBytes4a := []byte(`test attachment 4a`)
-			attachment4a := &Attachment{}
+			attachment4a := &AttachmentInfo{}
 			attachment4a.AttachmentBytes = testBytes4a
 			attachment4a.ContentType = "application/octet-stream"
 			attachment4a.Name = "data1"
 
 			testBytes4b := []byte(`test attachment 4b`)
-			attachment4b := &Attachment{}
+			attachment4b := &AttachmentInfo{}
 			attachment4b.AttachmentBytes = testBytes4b
 			attachment4b.ContentType = "application/octet-stream"
 			attachment4b.Name = "data2"
 
-			attachments4 := []*Attachment{}
+			attachments4 := []*AttachmentInfo{}
 			attachments4 = append(attachments4, attachment4a)
 			attachments4 = append(attachments4, attachment4b)
 
@@ -454,18 +527,18 @@ func TestDBCreateDatabaseAndPersist(t *testing.T) {
 			}
 
 			testBytes5a := []byte(`test attachment 5a`)
-			attachment5a := &Attachment{}
+			attachment5a := &AttachmentInfo{}
 			attachment5a.AttachmentBytes = testBytes5a
 			attachment5a.ContentType = "application/octet-stream"
 			attachment5a.Name = "data1"
 
 			testBytes5b := []byte{}
-			attachment5b := &Attachment{}
+			attachment5b := &AttachmentInfo{}
 			attachment5b.AttachmentBytes = testBytes5b
 			attachment5b.ContentType = "application/octet-stream"
 			attachment5b.Name = "data2"
 
-			attachments5 := []*Attachment{}
+			attachments5 := []*AttachmentInfo{}
 			attachments5 = append(attachments5, attachment5a)
 			attachments5 = append(attachments5, attachment5b)
 
@@ -566,7 +639,7 @@ func TestDBTimeoutConflictRetry(t *testing.T) {
 		db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 		//create a new database
-		_, errdb := db.CreateDatabaseIfNotExist()
+		errdb := db.CreateDatabaseIfNotExist()
 		testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 		//Retrieve the info for the new database and make sure the name matches
@@ -609,7 +682,7 @@ func TestDBBadNumberOfRetries(t *testing.T) {
 
 		//create a new instance and database object
 		_, err = CreateCouchInstance(couchDBDef.URL, couchDBDef.Username, couchDBDef.Password,
-			0, 3, couchDBDef.RequestTimeout)
+			-1, 3, couchDBDef.RequestTimeout)
 		testutil.AssertError(t, err, fmt.Sprintf("Error should have been thrown while attempting to create a database"))
 
 	}
@@ -633,7 +706,7 @@ func TestDBBadJSON(t *testing.T) {
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Retrieve the info for the new database and make sure the name matches
@@ -670,7 +743,7 @@ func TestPrefixScan(t *testing.T) {
 		db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 		//create a new database
-		_, errdb := db.CreateDatabaseIfNotExist()
+		errdb := db.CreateDatabaseIfNotExist()
 		testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 		//Retrieve the info for the new database and make sure the name matches
@@ -729,12 +802,12 @@ func TestDBSaveAttachment(t *testing.T) {
 
 			byteText := []byte(`This is a test document.  This is only a test`)
 
-			attachment := &Attachment{}
+			attachment := &AttachmentInfo{}
 			attachment.AttachmentBytes = byteText
 			attachment.ContentType = "text/plain"
 			attachment.Name = "valueBytes"
 
-			attachments := []*Attachment{}
+			attachments := []*AttachmentInfo{}
 			attachments = append(attachments, attachment)
 
 			//create a new instance and database object
@@ -744,7 +817,7 @@ func TestDBSaveAttachment(t *testing.T) {
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Save the test document
@@ -778,7 +851,7 @@ func TestDBDeleteDocument(t *testing.T) {
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Save the test document
@@ -817,7 +890,7 @@ func TestDBDeleteNonExistingDocument(t *testing.T) {
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Save the test document
@@ -843,6 +916,179 @@ func TestCouchDBVersion(t *testing.T) {
 
 }
 
+func TestIndexOperations(t *testing.T) {
+
+	database := "testindexoperations"
+	err := cleanup(database)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error when trying to cleanup  Error: %s", err))
+	defer cleanup(database)
+
+	byteJSON1 := []byte(`{"_id":"1", "asset_name":"marble1","color":"blue","size":1,"owner":"jerry"}`)
+	byteJSON2 := []byte(`{"_id":"2", "asset_name":"marble2","color":"red","size":2,"owner":"tom"}`)
+	byteJSON3 := []byte(`{"_id":"3", "asset_name":"marble3","color":"green","size":3,"owner":"jerry"}`)
+	byteJSON4 := []byte(`{"_id":"4", "asset_name":"marble4","color":"purple","size":4,"owner":"tom"}`)
+	byteJSON5 := []byte(`{"_id":"5", "asset_name":"marble5","color":"blue","size":5,"owner":"jerry"}`)
+	byteJSON6 := []byte(`{"_id":"6", "asset_name":"marble6","color":"white","size":6,"owner":"tom"}`)
+	byteJSON7 := []byte(`{"_id":"7", "asset_name":"marble7","color":"white","size":7,"owner":"tom"}`)
+	byteJSON8 := []byte(`{"_id":"8", "asset_name":"marble8","color":"white","size":8,"owner":"tom"}`)
+	byteJSON9 := []byte(`{"_id":"9", "asset_name":"marble9","color":"white","size":9,"owner":"tom"}`)
+	byteJSON10 := []byte(`{"_id":"10", "asset_name":"marble10","color":"white","size":10,"owner":"tom"}`)
+
+	//create a new instance and database object   --------------------------------------------------------
+	couchInstance, err := CreateCouchInstance(couchDBDef.URL, couchDBDef.Username, couchDBDef.Password,
+		couchDBDef.MaxRetries, couchDBDef.MaxRetriesOnStartup, couchDBDef.RequestTimeout)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error when trying to create couch instance"))
+	db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
+
+	//create a new database
+	errdb := db.CreateDatabaseIfNotExist()
+	testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
+
+	batchUpdateDocs := []*CouchDoc{}
+
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON1, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON2, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON3, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON4, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON5, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON6, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON7, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON8, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON9, Attachments: nil})
+	batchUpdateDocs = append(batchUpdateDocs, &CouchDoc{JSONValue: byteJSON10, Attachments: nil})
+
+	_, err = db.BatchUpdateDocuments(batchUpdateDocs)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error adding batch of documents"))
+
+	//Create an index definition
+	indexDefSize := "{\"index\":{\"fields\":[{\"size\":\"desc\"}]},\"ddoc\":\"indexSizeSortDoc\", \"name\":\"indexSizeSortName\",\"type\":\"json\"}"
+
+	//Create the index
+	_, err = db.CreateIndex(indexDefSize)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while creating an index"))
+
+	//Retrieve the list of indexes
+	//Delay for 100ms since CouchDB index list is updated async after index create/drop
+	time.Sleep(100 * time.Millisecond)
+	listResult, err := db.ListIndex()
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while retrieving indexes"))
+
+	//There should only be one item returned
+	testutil.AssertEquals(t, len(*listResult), 1)
+
+	//Verify the returned definition
+	for _, elem := range *listResult {
+		testutil.AssertEquals(t, elem.DesignDocument, "indexSizeSortDoc")
+		testutil.AssertEquals(t, elem.Name, "indexSizeSortName")
+		//ensure the index defintion is correct,  CouchDB 2.1.1 will also return "partial_filter_selector":{}
+		testutil.AssertEquals(t, strings.Contains(elem.Definition, `"fields":[{"size":"desc"}]`), true)
+	}
+
+	//Create an index definition with no DesignDocument or name
+	indexDefColor := "{\"index\":{\"fields\":[{\"color\":\"desc\"}]}}"
+
+	//Create the index
+	_, err = db.CreateIndex(indexDefColor)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while creating an index"))
+
+	//Retrieve the list of indexes
+	//Delay for 100ms since CouchDB index list is updated async after index create/drop
+	time.Sleep(100 * time.Millisecond)
+	listResult, err = db.ListIndex()
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while retrieving indexes"))
+
+	//There should be two indexes returned
+	testutil.AssertEquals(t, len(*listResult), 2)
+
+	//Delete the named index
+	err = db.DeleteIndex("indexSizeSortDoc", "indexSizeSortName")
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while deleting an index"))
+
+	//Retrieve the list of indexes
+	//Delay for 100ms since CouchDB index list is updated async after index create/drop
+	time.Sleep(100 * time.Millisecond)
+	listResult, err = db.ListIndex()
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while retrieving indexes"))
+
+	//There should be one index returned
+	testutil.AssertEquals(t, len(*listResult), 1)
+
+	//Delete the unnamed index
+	for _, elem := range *listResult {
+		err = db.DeleteIndex(elem.DesignDocument, string(elem.Name))
+		testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while deleting an index"))
+	}
+
+	//Retrieve the list of indexes
+	//Delay for 100ms since CouchDB index list is updated async after index create/drop
+	time.Sleep(100 * time.Millisecond)
+	listResult, err = db.ListIndex()
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while retrieving indexes"))
+	testutil.AssertEquals(t, len(*listResult), 0)
+
+	//Create a query string with a descending sort, this will require an index
+	queryString := "{\"selector\":{\"size\": {\"$gt\": 0}},\"fields\": [\"_id\", \"_rev\", \"owner\", \"asset_name\", \"color\", \"size\"], \"sort\":[{\"size\":\"desc\"}], \"limit\": 10,\"skip\": 0}"
+
+	//Execute a query with a sort, this should throw the exception
+	_, err = db.QueryDocuments(queryString)
+	testutil.AssertError(t, err, fmt.Sprintf("Error thrown while querying without a valid index"))
+
+	//Create the index
+	_, err = db.CreateIndex(indexDefSize)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while creating an index"))
+
+	//Delay for 100ms since CouchDB index list is updated async after index create/drop
+	time.Sleep(100 * time.Millisecond)
+
+	//Execute a query with an index,  this should succeed
+	_, err = db.QueryDocuments(queryString)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while querying with an index"))
+
+	//Create another index definition
+	indexDefSize = "{\"index\":{\"fields\":[{\"data.size\":\"desc\"},{\"data.owner\":\"desc\"}]},\"ddoc\":\"indexSizeOwnerSortDoc\", \"name\":\"indexSizeOwnerSortName\",\"type\":\"json\"}"
+
+	//Create the index
+	dbResp, err := db.CreateIndex(indexDefSize)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while creating an index"))
+
+	//verify the response is "created" for an index creation
+	testutil.AssertEquals(t, dbResp.Result, "created")
+
+	//Delay for 100ms since CouchDB index list is updated async after index create/drop
+	time.Sleep(100 * time.Millisecond)
+
+	//Update the index
+	dbResp, err = db.CreateIndex(indexDefSize)
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while creating an index"))
+
+	//verify the response is "exists" for an update
+	testutil.AssertEquals(t, dbResp.Result, "exists")
+
+	//Retrieve the list of indexes
+	//Delay for 100ms since CouchDB index list is updated async after index create/drop
+	time.Sleep(100 * time.Millisecond)
+	listResult, err = db.ListIndex()
+	testutil.AssertNoError(t, err, fmt.Sprintf("Error thrown while retrieving indexes"))
+
+	//There should only be two definitions
+	testutil.AssertEquals(t, len(*listResult), 2)
+
+	//Create an invalid index definition with an invalid JSON
+	indexDefSize = "{\"index\"{\"fields\":[{\"data.size\":\"desc\"},{\"data.owner\":\"desc\"}]},\"ddoc\":\"indexSizeOwnerSortDoc\", \"name\":\"indexSizeOwnerSortName\",\"type\":\"json\"}"
+
+	//Create the index
+	_, err = db.CreateIndex(indexDefSize)
+	testutil.AssertError(t, err, fmt.Sprintf("Error should have been thrown for an invalid index JSON"))
+
+	//Create an invalid index definition with a valid JSON and an invalid index definition
+	indexDefSize = "{\"index\":{\"fields2\":[{\"data.size\":\"desc\"},{\"data.owner\":\"desc\"}]},\"ddoc\":\"indexSizeOwnerSortDoc\", \"name\":\"indexSizeOwnerSortName\",\"type\":\"json\"}"
+
+	//Create the index
+	_, err = db.CreateIndex(indexDefSize)
+	testutil.AssertError(t, err, fmt.Sprintf("Error should have been thrown for an invalid index definition"))
+
+}
+
 func TestRichQuery(t *testing.T) {
 
 	if ledgerconfig.IsCouchDBEnabled() {
@@ -860,88 +1106,88 @@ func TestRichQuery(t *testing.T) {
 		byteJSON11 := []byte(`{"asset_name":"marble11","color":"green","size":11,"owner":"tom"}`)
 		byteJSON12 := []byte(`{"asset_name":"marble12","color":"green","size":12,"owner":"frank"}`)
 
-		attachment1 := &Attachment{}
+		attachment1 := &AttachmentInfo{}
 		attachment1.AttachmentBytes = []byte(`marble01 - test attachment`)
 		attachment1.ContentType = "application/octet-stream"
 		attachment1.Name = "data"
-		attachments1 := []*Attachment{}
+		attachments1 := []*AttachmentInfo{}
 		attachments1 = append(attachments1, attachment1)
 
-		attachment2 := &Attachment{}
+		attachment2 := &AttachmentInfo{}
 		attachment2.AttachmentBytes = []byte(`marble02 - test attachment`)
 		attachment2.ContentType = "application/octet-stream"
 		attachment2.Name = "data"
-		attachments2 := []*Attachment{}
+		attachments2 := []*AttachmentInfo{}
 		attachments2 = append(attachments2, attachment2)
 
-		attachment3 := &Attachment{}
+		attachment3 := &AttachmentInfo{}
 		attachment3.AttachmentBytes = []byte(`marble03 - test attachment`)
 		attachment3.ContentType = "application/octet-stream"
 		attachment3.Name = "data"
-		attachments3 := []*Attachment{}
+		attachments3 := []*AttachmentInfo{}
 		attachments3 = append(attachments3, attachment3)
 
-		attachment4 := &Attachment{}
+		attachment4 := &AttachmentInfo{}
 		attachment4.AttachmentBytes = []byte(`marble04 - test attachment`)
 		attachment4.ContentType = "application/octet-stream"
 		attachment4.Name = "data"
-		attachments4 := []*Attachment{}
+		attachments4 := []*AttachmentInfo{}
 		attachments4 = append(attachments4, attachment4)
 
-		attachment5 := &Attachment{}
+		attachment5 := &AttachmentInfo{}
 		attachment5.AttachmentBytes = []byte(`marble05 - test attachment`)
 		attachment5.ContentType = "application/octet-stream"
 		attachment5.Name = "data"
-		attachments5 := []*Attachment{}
+		attachments5 := []*AttachmentInfo{}
 		attachments5 = append(attachments5, attachment5)
 
-		attachment6 := &Attachment{}
+		attachment6 := &AttachmentInfo{}
 		attachment6.AttachmentBytes = []byte(`marble06 - test attachment`)
 		attachment6.ContentType = "application/octet-stream"
 		attachment6.Name = "data"
-		attachments6 := []*Attachment{}
+		attachments6 := []*AttachmentInfo{}
 		attachments6 = append(attachments6, attachment6)
 
-		attachment7 := &Attachment{}
+		attachment7 := &AttachmentInfo{}
 		attachment7.AttachmentBytes = []byte(`marble07 - test attachment`)
 		attachment7.ContentType = "application/octet-stream"
 		attachment7.Name = "data"
-		attachments7 := []*Attachment{}
+		attachments7 := []*AttachmentInfo{}
 		attachments7 = append(attachments7, attachment7)
 
-		attachment8 := &Attachment{}
+		attachment8 := &AttachmentInfo{}
 		attachment8.AttachmentBytes = []byte(`marble08 - test attachment`)
 		attachment8.ContentType = "application/octet-stream"
 		attachment7.Name = "data"
-		attachments8 := []*Attachment{}
+		attachments8 := []*AttachmentInfo{}
 		attachments8 = append(attachments8, attachment8)
 
-		attachment9 := &Attachment{}
+		attachment9 := &AttachmentInfo{}
 		attachment9.AttachmentBytes = []byte(`marble09 - test attachment`)
 		attachment9.ContentType = "application/octet-stream"
 		attachment9.Name = "data"
-		attachments9 := []*Attachment{}
+		attachments9 := []*AttachmentInfo{}
 		attachments9 = append(attachments9, attachment9)
 
-		attachment10 := &Attachment{}
+		attachment10 := &AttachmentInfo{}
 		attachment10.AttachmentBytes = []byte(`marble10 - test attachment`)
 		attachment10.ContentType = "application/octet-stream"
 		attachment10.Name = "data"
-		attachments10 := []*Attachment{}
+		attachments10 := []*AttachmentInfo{}
 		attachments10 = append(attachments10, attachment10)
 
-		attachment11 := &Attachment{}
+		attachment11 := &AttachmentInfo{}
 		attachment11.AttachmentBytes = []byte(`marble11 - test attachment`)
 		attachment11.ContentType = "application/octet-stream"
 		attachment11.Name = "data"
-		attachments11 := []*Attachment{}
+		attachments11 := []*AttachmentInfo{}
 		attachments11 = append(attachments11, attachment11)
 
-		attachment12 := &Attachment{}
+		attachment12 := &AttachmentInfo{}
 		attachment12.AttachmentBytes = []byte(`marble12 - test attachment`)
 		attachment12.ContentType = "application/octet-stream"
 		attachment12.Name = "data"
-		attachments12 := []*Attachment{}
+		attachments12 := []*AttachmentInfo{}
 		attachments12 = append(attachments12, attachment12)
 
 		database := "testrichquery"
@@ -957,7 +1203,7 @@ func TestRichQuery(t *testing.T) {
 			db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 			//create a new database
-			_, errdb := db.CreateDatabaseIfNotExist()
+			errdb := db.CreateDatabaseIfNotExist()
 			testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 			//Save the test document
@@ -1121,7 +1367,7 @@ func TestRichQuery(t *testing.T) {
 	}
 }
 
-func TestBatchBatchOperations(t *testing.T) {
+func testBatchBatchOperations(t *testing.T, maxRetries int) {
 
 	if ledgerconfig.IsCouchDBEnabled() {
 
@@ -1130,41 +1376,49 @@ func TestBatchBatchOperations(t *testing.T) {
 		byteJSON03 := []byte(`{"_id":"marble03","asset_name":"marble03","color":"green","size":"3","owner":"jerry"}`)
 		byteJSON04 := []byte(`{"_id":"marble04","asset_name":"marble04","color":"purple","size":"4","owner":"tom"}`)
 		byteJSON05 := []byte(`{"_id":"marble05","asset_name":"marble05","color":"blue","size":"5","owner":"jerry"}`)
+		byteJSON06 := []byte(`{"_id":"marble06#$&'()*+,/:;=?@[]","asset_name":"marble06#$&'()*+,/:;=?@[]","color":"blue","size":"6","owner":"jerry"}`)
 
-		attachment1 := &Attachment{}
+		attachment1 := &AttachmentInfo{}
 		attachment1.AttachmentBytes = []byte(`marble01 - test attachment`)
 		attachment1.ContentType = "application/octet-stream"
 		attachment1.Name = "data"
-		attachments1 := []*Attachment{}
+		attachments1 := []*AttachmentInfo{}
 		attachments1 = append(attachments1, attachment1)
 
-		attachment2 := &Attachment{}
+		attachment2 := &AttachmentInfo{}
 		attachment2.AttachmentBytes = []byte(`marble02 - test attachment`)
 		attachment2.ContentType = "application/octet-stream"
 		attachment2.Name = "data"
-		attachments2 := []*Attachment{}
+		attachments2 := []*AttachmentInfo{}
 		attachments2 = append(attachments2, attachment2)
 
-		attachment3 := &Attachment{}
+		attachment3 := &AttachmentInfo{}
 		attachment3.AttachmentBytes = []byte(`marble03 - test attachment`)
 		attachment3.ContentType = "application/octet-stream"
 		attachment3.Name = "data"
-		attachments3 := []*Attachment{}
+		attachments3 := []*AttachmentInfo{}
 		attachments3 = append(attachments3, attachment3)
 
-		attachment4 := &Attachment{}
+		attachment4 := &AttachmentInfo{}
 		attachment4.AttachmentBytes = []byte(`marble04 - test attachment`)
 		attachment4.ContentType = "application/octet-stream"
 		attachment4.Name = "data"
-		attachments4 := []*Attachment{}
+		attachments4 := []*AttachmentInfo{}
 		attachments4 = append(attachments4, attachment4)
 
-		attachment5 := &Attachment{}
+		attachment5 := &AttachmentInfo{}
 		attachment5.AttachmentBytes = []byte(`marble05 - test attachment`)
 		attachment5.ContentType = "application/octet-stream"
 		attachment5.Name = "data"
-		attachments5 := []*Attachment{}
+		attachments5 := []*AttachmentInfo{}
 		attachments5 = append(attachments5, attachment5)
+
+		attachment6 := &AttachmentInfo{}
+		attachment6.AttachmentBytes = []byte(`marble06#$&'()*+,/:;=?@[] - test attachment`)
+		attachment6.ContentType = "application/octet-stream"
+		attachment6.Name = "data"
+		attachments6 := []*AttachmentInfo{}
+		attachments6 = append(attachments6, attachment6)
 
 		database := "testbatch"
 		err := cleanup(database)
@@ -1173,12 +1427,12 @@ func TestBatchBatchOperations(t *testing.T) {
 
 		//create a new instance and database object   --------------------------------------------------------
 		couchInstance, err := CreateCouchInstance(couchDBDef.URL, couchDBDef.Username, couchDBDef.Password,
-			couchDBDef.MaxRetries, couchDBDef.MaxRetriesOnStartup, couchDBDef.RequestTimeout)
+			maxRetries, couchDBDef.MaxRetriesOnStartup, couchDBDef.RequestTimeout)
 		testutil.AssertNoError(t, err, fmt.Sprintf("Error when trying to create couch instance"))
 		db := CouchDatabase{CouchInstance: *couchInstance, DBName: database}
 
 		//create a new database
-		_, errdb := db.CreateDatabaseIfNotExist()
+		errdb := db.CreateDatabaseIfNotExist()
 		testutil.AssertNoError(t, errdb, fmt.Sprintf("Error when trying to create database"))
 
 		batchUpdateDocs := []*CouchDoc{}
@@ -1188,12 +1442,14 @@ func TestBatchBatchOperations(t *testing.T) {
 		value3 := &CouchDoc{JSONValue: byteJSON03, Attachments: attachments3}
 		value4 := &CouchDoc{JSONValue: byteJSON04, Attachments: attachments4}
 		value5 := &CouchDoc{JSONValue: byteJSON05, Attachments: attachments5}
+		value6 := &CouchDoc{JSONValue: byteJSON06, Attachments: attachments6}
 
 		batchUpdateDocs = append(batchUpdateDocs, value1)
 		batchUpdateDocs = append(batchUpdateDocs, value2)
 		batchUpdateDocs = append(batchUpdateDocs, value3)
 		batchUpdateDocs = append(batchUpdateDocs, value4)
 		batchUpdateDocs = append(batchUpdateDocs, value5)
+		batchUpdateDocs = append(batchUpdateDocs, value6)
 
 		batchUpdateResp, err := db.BatchUpdateDocuments(batchUpdateDocs)
 		testutil.AssertNoError(t, err, fmt.Sprintf("Error when attempting to update a batch of documents"))
@@ -1209,6 +1465,18 @@ func TestBatchBatchOperations(t *testing.T) {
 		testutil.AssertNoError(t, geterr, fmt.Sprintf("Error when attempting read a document"))
 
 		assetResp := &Asset{}
+		geterr = json.Unmarshal(dbGetResp.JSONValue, &assetResp)
+		testutil.AssertNoError(t, geterr, fmt.Sprintf("Error when trying to retrieve a document"))
+		//Verify the owner retrieved matches
+		testutil.AssertEquals(t, assetResp.Owner, "jerry")
+
+		//----------------------------------------------
+		// Test Retrieve JSON using ID with URL special characters,
+		// this will confirm that batch document IDs and URL IDs are consistent, even if they include special characters
+		dbGetResp, _, geterr = db.ReadDoc("marble06#$&'()*+,/:;=?@[]")
+		testutil.AssertNoError(t, geterr, fmt.Sprintf("Error when attempting read a document"))
+
+		assetResp = &Asset{}
 		geterr = json.Unmarshal(dbGetResp.JSONValue, &assetResp)
 		testutil.AssertNoError(t, geterr, fmt.Sprintf("Error when trying to retrieve a document"))
 		//Verify the owner retrieved matches
@@ -1247,7 +1515,7 @@ func TestBatchBatchOperations(t *testing.T) {
 		keys = append(keys, "marble01")
 		keys = append(keys, "marble03")
 
-		batchRevs, err := db.BatchRetrieveIDRevision(keys)
+		batchRevs, err := db.BatchRetrieveDocumentMetadata(keys)
 		testutil.AssertNoError(t, err, fmt.Sprintf("Error when attempting retrieve revisions"))
 
 		batchUpdateDocs = []*CouchDoc{}
@@ -1283,7 +1551,7 @@ func TestBatchBatchOperations(t *testing.T) {
 		keys = append(keys, "marble02")
 		keys = append(keys, "marble04")
 
-		batchRevs, err = db.BatchRetrieveIDRevision(keys)
+		batchRevs, err = db.BatchRetrieveDocumentMetadata(keys)
 		testutil.AssertNoError(t, err, fmt.Sprintf("Error when attempting retrieve revisions"))
 
 		batchUpdateDocs = []*CouchDoc{}

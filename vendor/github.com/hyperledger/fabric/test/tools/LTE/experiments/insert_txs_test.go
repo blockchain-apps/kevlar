@@ -22,6 +22,7 @@ import (
 
 	"fmt"
 
+	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/test/tools/LTE/chainmgmt"
 	"github.com/hyperledger/fabric/test/tools/LTE/common"
 )
@@ -64,16 +65,22 @@ func runInsertClientsForChain(chain *chainmgmt.Chain) {
 }
 
 func runInsertClient(chain *chainmgmt.Chain, startKey, endKey int, wg *sync.WaitGroup) {
-	numKeysPerTx := conf.txConf.numKeysInEachTx
+	numWritesPerTx := conf.txConf.numWritesPerTx
 	kvSize := conf.dataConf.kvSize
+	useJSON := conf.dataConf.useJSON
 
 	currentKey := startKey
 	for currentKey <= endKey {
-		simulator, err := chain.NewTxSimulator()
+		simulator, err := chain.NewTxSimulator(util.GenerateUUID())
 		common.PanicOnError(err)
-		for i := 0; i < numKeysPerTx; i++ {
-			common.PanicOnError(simulator.SetState(
-				chaincodeName, constructKey(currentKey), constructValue(currentKey, kvSize)))
+		for i := 0; i < numWritesPerTx; i++ {
+			if useJSON {
+				common.PanicOnError(simulator.SetState(
+					chaincodeName, constructKey(currentKey), constructJSONValue(currentKey, kvSize)))
+			} else {
+				common.PanicOnError(simulator.SetState(
+					chaincodeName, constructKey(currentKey), constructValue(currentKey, kvSize)))
+			}
 			currentKey++
 			if currentKey > endKey {
 				break
@@ -82,7 +89,9 @@ func runInsertClient(chain *chainmgmt.Chain, startKey, endKey int, wg *sync.Wait
 		simulator.Done()
 		sr, err := simulator.GetTxSimulationResults()
 		common.PanicOnError(err)
-		chain.SubmitTx(sr)
+		srBytes, err := sr.GetPubSimulationBytes()
+		common.PanicOnError(err)
+		chain.SubmitTx(srBytes)
 	}
 	wg.Done()
 }

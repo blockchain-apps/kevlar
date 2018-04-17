@@ -19,8 +19,9 @@ package validation
 import (
 	"testing"
 
-	"github.com/hyperledger/fabric/common/configtx"
-	genesisconfig "github.com/hyperledger/fabric/common/configtx/tool/localconfig"
+	"github.com/hyperledger/fabric/common/mocks/config"
+	"github.com/hyperledger/fabric/common/tools/configtxgen/encoder"
+	genesisconfig "github.com/hyperledger/fabric/common/tools/configtxgen/localconfig"
 	"github.com/hyperledger/fabric/common/util"
 	cb "github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/peer"
@@ -29,9 +30,9 @@ import (
 
 func TestValidateConfigTx(t *testing.T) {
 	chainID := util.GetTestChainID()
-	chCrtEnv, err := configtx.MakeChainCreationTransaction(genesisconfig.SampleConsortiumName, chainID, signer)
+	chCrtEnv, err := encoder.MakeChannelCreationTransaction(genesisconfig.SampleConsortiumName, nil, nil, genesisconfig.Load(genesisconfig.SampleSingleMSPChannelProfile))
 	if err != nil {
-		t.Fatalf("MakeChainCreationTransaction failed, err %s", err)
+		t.Fatalf("MakeChannelCreationTransaction failed, err %s", err)
 		return
 	}
 
@@ -52,7 +53,7 @@ func TestValidateConfigTx(t *testing.T) {
 		}),
 	}
 	updateResult.Signature, _ = signer.Sign(updateResult.Payload)
-	_, txResult := ValidateTransaction(updateResult)
+	_, txResult := ValidateTransaction(updateResult, &config.MockApplicationCapabilities{})
 	if txResult != peer.TxValidationCode_VALID {
 		t.Fatalf("ValidateTransaction failed, err %s", err)
 		return

@@ -19,6 +19,8 @@ package scc
 import (
 	"fmt"
 
+	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/core/common/sysccprovider"
 	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/peer"
@@ -50,7 +52,7 @@ func (c *sccProviderImpl) IsSysCC(name string) bool {
 }
 
 // IsSysCCAndNotInvokableCC2CC returns true if the supplied chaincode is
-// ia system chaincode and it NOT nvokable through a cc2cc invocation
+// ia system chaincode and it NOT invokable through a cc2cc invocation
 func (c *sccProviderImpl) IsSysCCAndNotInvokableCC2CC(name string) bool {
 	return IsSysCCAndNotInvokableCC2CC(name)
 }
@@ -66,8 +68,21 @@ func (c *sccProviderImpl) GetQueryExecutorForLedger(cid string) (ledger.QueryExe
 }
 
 // IsSysCCAndNotInvokableExternal returns true if the supplied chaincode is
-// ia system chaincode and it NOT nvokable
+// ia system chaincode and it NOT invokable
 func (c *sccProviderImpl) IsSysCCAndNotInvokableExternal(name string) bool {
 	// call the static method of the same name
 	return IsSysCCAndNotInvokableExternal(name)
+}
+
+// GetApplicationConfig returns the configtxapplication.SharedConfig for the channel
+// and whether the Application config exists
+func (c *sccProviderImpl) GetApplicationConfig(cid string) (channelconfig.Application, bool) {
+	return peer.GetSupport().GetApplicationConfig(cid)
+}
+
+// Returns the policy manager associated to the passed channel
+// and whether the policy manager exists
+func (c *sccProviderImpl) PolicyManager(channelID string) (policies.Manager, bool) {
+	m := peer.GetPolicyManager(channelID)
+	return m, (m != nil)
 }

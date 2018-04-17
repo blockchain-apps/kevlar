@@ -19,15 +19,24 @@ package ledgermgmt
 import (
 	"os"
 
-	"fmt"
+	"github.com/hyperledger/fabric/core/ledger/customtx"
 
 	"github.com/hyperledger/fabric/core/ledger/ledgerconfig"
+
+	"fmt"
 )
 
 // InitializeTestEnv initializes ledgermgmt for tests
 func InitializeTestEnv() {
 	remove()
-	initialize()
+	initialize(nil)
+}
+
+// InitializeTestEnvWithCustomProcessors initializes ledgermgmt for tests with the supplied custom tx processors
+func InitializeTestEnvWithCustomProcessors(customTxProcessors customtx.Processors) {
+	remove()
+	customtx.InitializeTestEnv(customTxProcessors)
+	initialize(customTxProcessors)
 }
 
 // CleanupTestEnv closes the ledgermagmt and removes the store directory

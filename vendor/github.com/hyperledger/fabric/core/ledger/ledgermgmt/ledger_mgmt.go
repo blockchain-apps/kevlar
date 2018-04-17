@@ -20,10 +20,13 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/hyperledger/fabric/core/ledger/cceventmgmt"
+
 	"fmt"
 
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/ledger"
+	"github.com/hyperledger/fabric/core/ledger/customtx"
 	"github.com/hyperledger/fabric/core/ledger/kvledger"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/utils"
@@ -44,22 +47,25 @@ var initialized bool
 var once sync.Once
 
 // Initialize initializes ledgermgmt
-func Initialize() {
+func Initialize(customTxProcessors customtx.Processors) {
 	once.Do(func() {
-		initialize()
+		initialize(customTxProcessors)
 	})
 }
 
-func initialize() {
+func initialize(customTxProcessors customtx.Processors) {
 	logger.Info("Initializing ledger mgmt")
 	lock.Lock()
 	defer lock.Unlock()
 	initialized = true
 	openedLedgers = make(map[string]ledger.PeerLedger)
+	customtx.Initialize(customTxProcessors)
+	cceventmgmt.Initialize()
 	provider, err := kvledger.NewProvider()
 	if err != nil {
 		panic(fmt.Errorf("Error in instantiating ledger provider: %s", err))
 	}
+	provider.Initialize(kvLedgerStateListeners)
 	ledgerProvider = provider
 	logger.Info("ledger mgmt initialized")
 }

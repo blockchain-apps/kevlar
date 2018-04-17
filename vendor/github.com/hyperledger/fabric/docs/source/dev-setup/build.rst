@@ -1,10 +1,10 @@
-Building the fabric
--------------------
+Building Hyperledger Fabric
+---------------------------
 
 The following instructions assume that you have already set up your
 :doc:`development environment <devenv>`.
 
-To build the Fabric:
+To build Hyperledger Fabric:
 
 ::
 
@@ -33,7 +33,7 @@ To run a specific test use the ``-run RE`` flag where RE is a regular
 expression that matches the test case name. To run tests with verbose
 output use the ``-v`` flag. For example, to run the ``TestGetFoo`` test
 case, change to the directory containing the ``foo_test.go`` and
-call/excecute
+call/execute
 
 ::
 
@@ -41,10 +41,10 @@ call/excecute
 
 
 
-Running Node.js Unit Tests
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Running Node.js Client SDK Unit Tests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You must also run the Node.js unit tests to insure that the Node.js
+You must also run the Node.js unit tests to ensure that the Node.js
 client SDK is not broken by your changes. To run the Node.js unit tests,
 follow the instructions
 `here <https://github.com/hyperledger/fabric-sdk-node/blob/master/README.md>`__.
@@ -153,19 +153,6 @@ manipulation through the environment is shown below:
 ::
 
     CORE_PEER_LOGGING_LEVEL=CRITICAL peer
-
-Logging
--------
-
-Logging utilizes the `go-logging <https://github.com/op/go-logging>`__
-library.
-
-The available log levels in order of increasing verbosity are: *CRITICAL
-\| ERROR \| WARNING \| NOTICE \| INFO \| DEBUG*
-
-See the :doc:`logging-control` document for
-instructions on tweaking the level of log messages to output when running
-the various Fabric components.
 
 .. Licensed under Creative Commons Attribution 4.0 International License
    https://creativecommons.org/licenses/by/4.0/

@@ -1,33 +1,22 @@
 /*
-Copyright IBM Corp. 2017 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-                 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package blocksprovider
 
 import (
 	"math"
+	"sync/atomic"
 	"time"
 
-	"sync/atomic"
-
 	"github.com/golang/protobuf/proto"
-	gossipcommon "github.com/hyperledger/fabric/gossip/common"
-	"github.com/hyperledger/fabric/gossip/discovery"
-
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/gossip/api"
+	gossipcommon "github.com/hyperledger/fabric/gossip/common"
+	"github.com/hyperledger/fabric/gossip/discovery"
+	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/common"
 	gossip_proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/orderer"
@@ -60,6 +49,9 @@ type BlocksProvider interface {
 	// DeliverBlocks starts delivering and disseminating blocks
 	DeliverBlocks()
 
+	// UpdateClientEndpoints update endpoints
+	UpdateOrderingEndpoints(endpoints []string)
+
 	// Stop shutdowns blocks provider and stops delivering new blocks
 	Stop()
 }
@@ -80,11 +72,17 @@ type BlocksDeliverer interface {
 type streamClient interface {
 	BlocksDeliverer
 
+	// UpdateEndpoint update ordering service endpoints
+	UpdateEndpoints(endpoints []string)
+
+	// GetEndpoints
+	GetEndpoints() []string
+
 	// Close closes the stream and its underlying connection
 	Close()
 
-	// Disconnect disconnects from the remote node
-	Disconnect()
+	// Disconnect disconnects from the remote node and disable reconnect to current endpoint for predefined period of time
+	Disconnect(disableEndpoint bool)
 }
 
 // blocksProviderImpl the actual implementation for BlocksProvider interface
@@ -158,7 +156,11 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 			if currDelay < maxDelay {
 				statusCounter++
 			}
-			b.client.Disconnect()
+			if t.Status == common.Status_BAD_REQUEST {
+				b.client.Disconnect(false)
+			} else {
+				b.client.Disconnect(true)
+			}
 			continue
 		case *orderer.DeliverResponse_Block:
 			errorStatusCounter = 0
@@ -183,7 +185,9 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 
 			logger.Debugf("[%s] Adding payload locally, buffer seqNum = [%d], peers number [%d]", b.chainID, seqNum, numberOfPeers)
 			// Add payload to local state payloads buffer
-			b.gossip.AddPayload(b.chainID, payload)
+			if err := b.gossip.AddPayload(b.chainID, payload); err != nil {
+				logger.Warning("Failed adding payload of", seqNum, "because:", err)
+			}
 
 			// Gossip messages with other nodes
 			logger.Debugf("[%s] Gossiping block [%d], peers number [%d]", b.chainID, seqNum, numberOfPeers)
@@ -199,6 +203,35 @@ func (b *blocksProviderImpl) DeliverBlocks() {
 func (b *blocksProviderImpl) Stop() {
 	atomic.StoreInt32(&b.done, 1)
 	b.client.Close()
+}
+
+// UpdateOrderingEndpoints update endpoints of ordering service
+func (b *blocksProviderImpl) UpdateOrderingEndpoints(endpoints []string) {
+	if !b.isEndpointsUpdated(endpoints) {
+		// No new endpoints for ordering service were provided
+		return
+	}
+	// We have got new set of endpoints, updating client
+	logger.Debug("Updating endpoint, to %s", endpoints)
+	b.client.UpdateEndpoints(endpoints)
+	logger.Debug("Disconnecting so endpoints update will take effect")
+	// We need to disconnect the client to make it reconnect back
+	// to newly updated endpoints
+	b.client.Disconnect(false)
+}
+func (b *blocksProviderImpl) isEndpointsUpdated(endpoints []string) bool {
+	if len(endpoints) != len(b.client.GetEndpoints()) {
+		return true
+	}
+	// Check that endpoints was actually updated
+	for _, endpoint := range endpoints {
+		if !util.Contains(endpoint, b.client.GetEndpoints()) {
+			// Found new endpoint
+			return true
+		}
+	}
+	// Nothing has changed
+	return false
 }
 
 // Check whenever provider is stopped

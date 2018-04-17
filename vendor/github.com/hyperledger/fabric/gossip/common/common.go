@@ -1,20 +1,12 @@
 /*
-Copyright IBM Corp. 2016 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-                 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package common
+
+import "bytes"
 
 func init() {
 	// This is just to satisfy the code coverage tool
@@ -27,6 +19,13 @@ func init() {
 // PKIidType defines the type that holds the PKI-id
 // which is the security identifier of a peer
 type PKIidType []byte
+
+// IsNotSameFilter generate filter function which
+// provides a predicate to identify whenever current id
+// equals to another one.
+func (id PKIidType) IsNotSameFilter(that PKIidType) bool {
+	return !bytes.Equal(id, that)
+}
 
 // MessageAcceptor is a predicate that is used to
 // determine in which messages the subscriber that created the

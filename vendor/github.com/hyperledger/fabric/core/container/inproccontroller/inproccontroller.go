@@ -1,17 +1,7 @@
 /*
-Copyright IBM Corp. 2016 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-		 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package inproccontroller
@@ -38,9 +28,11 @@ type inprocContainer struct {
 }
 
 var (
-	inprocLogger = flogging.MustGetLogger("inproccontroller")
-	typeRegistry = make(map[string]*inprocContainer)
-	instRegistry = make(map[string]*inprocContainer)
+	inprocLogger        = flogging.MustGetLogger("inproccontroller")
+	typeRegistry        = make(map[string]*inprocContainer)
+	instRegistry        = make(map[string]*inprocContainer)
+	_shimStartInProc    = shim.StartInProc
+	_inprocLoggerErrorf = inprocLogger.Errorf
 )
 
 // errors
@@ -93,7 +85,7 @@ func (vm *InprocVM) Deploy(ctxt context.Context, ccid ccintf.CCID, args []string
 		return fmt.Errorf(fmt.Sprintf("%s system chaincode does not contain chaincode instance", path))
 	}
 
-	instName, _ := vm.GetVMName(ccid)
+	instName, _ := vm.GetVMName(ccid, nil)
 	_, err := vm.getInstance(ctxt, ipctemplate, instName, args, env)
 
 	//FUTURE ... here is where we might check code for safety
@@ -117,10 +109,10 @@ func (ipc *inprocContainer) launchInProc(ctxt context.Context, id string, args [
 		if env == nil {
 			env = ipc.env
 		}
-		err := shim.StartInProc(env, args, ipc.chaincode, ccRcvPeerSend, peerRcvCCSend)
+		err := _shimStartInProc(env, args, ipc.chaincode, ccRcvPeerSend, peerRcvCCSend)
 		if err != nil {
 			err = fmt.Errorf("chaincode-support ended with err: %s", err)
-			inprocLogger.Errorf("%s", err)
+			_inprocLoggerErrorf("%s", err)
 		}
 		inprocLogger.Debugf("chaincode ended with for  %s with err: %s", id, err)
 	}()
@@ -132,7 +124,7 @@ func (ipc *inprocContainer) launchInProc(ctxt context.Context, id string, args [
 		err := ccSupport.HandleChaincodeStream(ctxt, inprocStream)
 		if err != nil {
 			err = fmt.Errorf("chaincode ended with err: %s", err)
-			inprocLogger.Errorf("%s", err)
+			_inprocLoggerErrorf("%s", err)
 		}
 		inprocLogger.Debugf("chaincode-support ended with for  %s with err: %s", id, err)
 	}()
@@ -149,12 +141,11 @@ func (ipc *inprocContainer) launchInProc(ctxt context.Context, id string, args [
 		close(peerRcvCCSend)
 		inprocLogger.Debugf("chaincode %s stopped", id)
 	}
-
 	return err
 }
 
 //Start starts a previously registered system codechain
-func (vm *InprocVM) Start(ctxt context.Context, ccid ccintf.CCID, args []string, env []string, builder container.BuildSpecFactory, prelaunchFunc container.PrelaunchFunc) error {
+func (vm *InprocVM) Start(ctxt context.Context, ccid ccintf.CCID, args []string, env []string, filesToUpload map[string][]byte, builder container.BuildSpecFactory, prelaunchFunc container.PrelaunchFunc) error {
 	path := ccid.ChaincodeSpec.ChaincodeId.Path
 
 	ipctemplate := typeRegistry[path]
@@ -163,7 +154,7 @@ func (vm *InprocVM) Start(ctxt context.Context, ccid ccintf.CCID, args []string,
 		return fmt.Errorf(fmt.Sprintf("%s not registered", path))
 	}
 
-	instName, _ := vm.GetVMName(ccid)
+	instName, _ := vm.GetVMName(ccid, nil)
 
 	ipc, err := vm.getInstance(ctxt, ipctemplate, instName, args, env)
 
@@ -211,7 +202,7 @@ func (vm *InprocVM) Stop(ctxt context.Context, ccid ccintf.CCID, timeout uint, d
 		return fmt.Errorf("%s not registered", path)
 	}
 
-	instName, _ := vm.GetVMName(ccid)
+	instName, _ := vm.GetVMName(ccid, nil)
 
 	ipc := instRegistry[instName]
 
@@ -236,7 +227,17 @@ func (vm *InprocVM) Destroy(ctxt context.Context, ccid ccintf.CCID, force bool, 
 	return nil
 }
 
-//GetVMName ignores the peer and network name as it just needs to be unique in process
-func (vm *InprocVM) GetVMName(ccid ccintf.CCID) (string, error) {
-	return ccid.GetName(), nil
+// GetVMName ignores the peer and network name as it just needs to be unique in
+// process.  It accepts a format function parameter to allow different
+// formatting based on the desired use of the name.
+func (vm *InprocVM) GetVMName(ccid ccintf.CCID, format func(string) (string, error)) (string, error) {
+	name := ccid.GetName()
+	if format != nil {
+		formattedName, err := format(name)
+		if err != nil {
+			return formattedName, err
+		}
+		name = formattedName
+	}
+	return name, nil
 }

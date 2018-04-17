@@ -17,6 +17,7 @@ limitations under the License.
 package ccprovider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -25,9 +26,6 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
-
-	"bytes"
-
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/ledger"
 	pb "github.com/hyperledger/fabric/protos/peer"
@@ -215,7 +213,7 @@ func GetChaincodeData(ccname string, ccversion string) (*ChaincodeData, error) {
 	}
 }
 
-func CheckInsantiationPolicy(name, version string, cdLedger *ChaincodeData) error {
+func CheckInstantiationPolicy(name, version string, cdLedger *ChaincodeData) error {
 	ccdata, err := GetChaincodeData(name, version)
 	if err != nil {
 		return err
@@ -303,7 +301,7 @@ func GetInstalledChaincodes() (*pb.ChaincodeQueryResponse, error) {
 			// since this is just an installed chaincode these should be blank
 			input, escc, vscc := "", "", ""
 
-			ccInfo := &pb.ChaincodeInfo{Name: name, Version: version, Path: path, Input: input, Escc: escc, Vscc: vscc}
+			ccInfo := &pb.ChaincodeInfo{Name: name, Version: version, Path: path, Input: input, Escc: escc, Vscc: vscc, Id: ccpack.GetId()}
 
 			// add this specific chaincode's metadata to the array of all chaincodes
 			ccInfoArray = append(ccInfoArray, ccInfo)
@@ -345,6 +343,9 @@ type CCContext struct {
 
 	//this is not set but computed (note that this is not exported. use GetCanonicalName)
 	canonicalName string
+
+	// this is additional data passed to the chaincode
+	ProposalDecorations map[string][]byte
 }
 
 //NewCCContext just construct a new struct with whatever args
@@ -358,7 +359,7 @@ func NewCCContext(cid, name, version, txid string, syscc bool, signedProp *pb.Si
 
 	canName := name + ":" + version
 
-	cccid := &CCContext{cid, name, version, txid, syscc, signedProp, prop, canName}
+	cccid := &CCContext{cid, name, version, txid, syscc, signedProp, prop, canName, nil}
 
 	ccproviderLogger.Debugf("NewCCCC (chain=%s,chaincode=%s,version=%s,txid=%s,syscc=%t,proposal=%p,canname=%s", cid, name, version, txid, syscc, prop, cccid.canonicalName)
 
@@ -407,6 +408,37 @@ type ChaincodeData struct {
 	InstantiationPolicy []byte `protobuf:"bytes,8,opt,name=instantiation_policy,proto3"`
 }
 
+// implement functions needed by resourcesconfig.ChaincodeDefinition
+
+// CCName returns the name of this chaincode (the name it was put in the ChaincodeRegistry with).
+func (cd *ChaincodeData) CCName() string {
+	return cd.Name
+}
+
+// Hash returns the hash of the chaincode.
+func (cd *ChaincodeData) Hash() []byte {
+	return cd.Id
+}
+
+// CCVersion returns the version of the chaincode.
+func (cd *ChaincodeData) CCVersion() string {
+	return cd.Version
+}
+
+// Validation returns how to validate transactions for this chaincode.
+// The string returned is the name of the validation method (usually 'vscc')
+// and the bytes returned are the argument to the validation (in the case of
+// 'vscc', this is a marshaled pb.VSCCArgs message).
+func (cd *ChaincodeData) Validation() (string, []byte) {
+	return cd.Vscc, cd.Policy
+}
+
+// Endorsement returns how to endorse proposals for this chaincode.
+// The string returns is the name of the endorsement method (usually 'escc').
+func (cd *ChaincodeData) Endorsement() string {
+	return cd.Escc
+}
+
 //implement functions needed from proto.Message for proto's mar/unmarshal functions
 
 //Reset resets
@@ -423,22 +455,20 @@ func (*ChaincodeData) ProtoMessage() {}
 // chaincode package without importing it; more methods
 // should be added below if necessary
 type ChaincodeProvider interface {
-	// GetContext returns a ledger context
-	GetContext(ledger ledger.PeerLedger) (context.Context, error)
+	// GetContext returns a ledger context and a tx simulator; it's the
+	// caller's responsability to release the simulator by calling its
+	// done method once it is no longer useful
+	GetContext(ledger ledger.PeerLedger, txid string) (context.Context, ledger.TxSimulator, error)
 	// GetCCContext returns an opaque chaincode context
 	GetCCContext(cid, name, version, txid string, syscc bool, signedProp *pb.SignedProposal, prop *pb.Proposal) interface{}
-	// GetCCValidationInfoFromLSCC returns the VSCC and the policy listed by LSCC for the supplied chaincode
-	GetCCValidationInfoFromLSCC(ctxt context.Context, txid string, signedProp *pb.SignedProposal, prop *pb.Proposal, chainID string, chaincodeID string) (string, []byte, error)
 	// ExecuteChaincode executes the chaincode given context and args
 	ExecuteChaincode(ctxt context.Context, cccid interface{}, args [][]byte) (*pb.Response, *pb.ChaincodeEvent, error)
 	// Execute executes the chaincode given context and spec (invocation or deploy)
 	Execute(ctxt context.Context, cccid interface{}, spec interface{}) (*pb.Response, *pb.ChaincodeEvent, error)
-	// ExecuteWithErrorFilder executes the chaincode given context and spec and returns payload
+	// ExecuteWithErrorFilter executes the chaincode given context and spec and returns payload
 	ExecuteWithErrorFilter(ctxt context.Context, cccid interface{}, spec interface{}) ([]byte, *pb.ChaincodeEvent, error)
 	// Stop stops the chaincode given context and deployment spec
 	Stop(ctxt context.Context, cccid interface{}, spec *pb.ChaincodeDeploymentSpec) error
-	// ReleaseContext releases the context returned previously by GetContext
-	ReleaseContext()
 }
 
 var ccFactory ChaincodeProviderFactory

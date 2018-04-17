@@ -1,17 +1,7 @@
 /*
-Copyright IBM Corp. 2016 All Rights Reserved.
+Copyright IBM Corp. All Rights Reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-		 http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package gossip
@@ -139,7 +129,20 @@ func (ga *gossipAdapterImpl) GetConf() channel.Config {
 
 // Gossip gossips a message
 func (ga *gossipAdapterImpl) Gossip(msg *proto.SignedGossipMessage) {
-	ga.gossipServiceImpl.emitter.Add(msg)
+	ga.gossipServiceImpl.emitter.Add(&emittedGossipMessage{
+		SignedGossipMessage: msg,
+		filter: func(_ common.PKIidType) bool {
+			return true
+		},
+	})
+}
+
+// Forward sends message to the next hops
+func (ga *gossipAdapterImpl) Forward(msg proto.ReceivedMessage) {
+	ga.gossipServiceImpl.emitter.Add(&emittedGossipMessage{
+		SignedGossipMessage: msg.GetGossipMessage(),
+		filter:              msg.GetConnectionInfo().ID.IsNotSameFilter,
+	})
 }
 
 func (ga *gossipAdapterImpl) Send(msg *proto.SignedGossipMessage, peers ...*comm.RemotePeer) {
