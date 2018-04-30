@@ -57,6 +57,12 @@ module.exports = require("protobufjs").newBuilder({})['import']({
                     "type": "SupercededBy",
                     "name": "supercede",
                     "id": 9
+                },
+                {
+                    "rule": "optional",
+                    "type": "string",
+                    "name": "eventData",
+                    "id": 10
                 }
             ],
             "enums": [

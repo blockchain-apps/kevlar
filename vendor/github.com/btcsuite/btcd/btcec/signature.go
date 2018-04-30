@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2014 The btcsuite developers
+// Copyright (c) 2013-2017 The btcsuite developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -29,10 +29,6 @@ type Signature struct {
 }
 
 var (
-	// Curve order and halforder, used to tame ECDSA malleability (see BIP-0062)
-	order     = new(big.Int).Set(S256().N)
-	halforder = new(big.Int).Rsh(order, 1)
-
 	// Used in RFC6979 implementation when testing the nonce for correctness
 	one = big.NewInt(1)
 
@@ -51,8 +47,8 @@ var (
 func (sig *Signature) Serialize() []byte {
 	// low 'S' malleability breaker
 	sigS := sig.S
-	if sigS.Cmp(halforder) == 1 {
-		sigS = new(big.Int).Sub(order, sigS)
+	if sigS.Cmp(S256().halfOrder) == 1 {
+		sigS = new(big.Int).Sub(S256().N, sigS)
 	}
 	// Ensure the encoded bytes for the r and s values are canonical and
 	// thus suitable for DER encoding.
@@ -62,7 +58,7 @@ func (sig *Signature) Serialize() []byte {
 	// total length of returned signature is 1 byte for each magic and
 	// length (6 total), plus lengths of r and s
 	length := 6 + len(rb) + len(sb)
-	b := make([]byte, length, length)
+	b := make([]byte, length)
 
 	b[0] = 0x30
 	b[1] = byte(length - 2)
@@ -273,7 +269,7 @@ func hashToInt(hash []byte, c elliptic.Curve) *big.Int {
 	return ret
 }
 
-// recoverKeyFromSignature recoves a public key from the signature "sig" on the
+// recoverKeyFromSignature recovers a public key from the signature "sig" on the
 // given message hash "msg". Based on the algorithm found in section 5.1.5 of
 // SEC 1 Ver 2.0, page 47-48 (53 and 54 in the pdf). This performs the details
 // in the inner loop in Step 1. The counter provided is actually the j parameter
@@ -328,7 +324,7 @@ func recoverKeyFromSignature(curve *KoblitzCurve, sig *Signature, msg []byte,
 	e.Mod(e, curve.Params().N)
 	minuseGx, minuseGy := curve.ScalarBaseMult(e.Bytes())
 
-	// TODO(oga) this would be faster if we did a mult and add in one
+	// TODO: this would be faster if we did a mult and add in one
 	// step to prevent the jacobian conversion back and forth.
 	Qx, Qy := curve.Add(sRx, sRy, minuseGx, minuseGy)
 
@@ -420,7 +416,8 @@ func RecoverCompact(curve *KoblitzCurve, signature,
 func signRFC6979(privateKey *PrivateKey, hash []byte) (*Signature, error) {
 
 	privkey := privateKey.ToECDSA()
-	N := order
+	N := S256().N
+	halfOrder := S256().halfOrder
 	k := nonceRFC6979(privkey.D, hash)
 	inv := new(big.Int).ModInverse(k, N)
 	r, _ := privkey.Curve.ScalarBaseMult(k.Bytes())
@@ -438,7 +435,7 @@ func signRFC6979(privateKey *PrivateKey, hash []byte) (*Signature, error) {
 	s.Mul(s, inv)
 	s.Mod(s, N)
 
-	if s.Cmp(halforder) == 1 {
+	if s.Cmp(halfOrder) == 1 {
 		s.Sub(N, s)
 	}
 	if s.Sign() == 0 {

@@ -16,6 +16,7 @@ message ProofTX {
   repeated bytes Digests =7;
   repeated bytes PreImages =8;
    SupercededBy Supercede =9;
+   string eventData =10;
 }
 
 message SupercededBy{

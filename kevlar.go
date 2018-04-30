@@ -10,6 +10,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -17,16 +18,29 @@ import (
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	pb "github.com/hyperledger/fabric/protos/peer"
 
+	"encoding/json"
+
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/golang/protobuf/proto"
-	"github.com/skuchain/kevlar/ProofElements"
-	"github.com/skuchain/kevlar/ProofTx"
 )
 
 // This chaincode implements the ledger operations for the proofchaincode
 
+type kevlarChainCodeEvent struct {
+	Function     string
+	Proof        proofTx.ProofTX
+	SecpProof    *ElementProof.SecP256k1ElementProof
+	SecpShaProof *ElementProof.SecP256k1SHA2ElementProof
+}
+
 // ProofChainCode example simple Chaincode implementation
 type kevlarChainCode struct {
+}
+
+func prettyprint(b []byte) ([]byte, error) {
+	var out bytes.Buffer
+	err := json.Indent(&out, b, "", "  ")
+	return out.Bytes(), err
 }
 
 func (t *kevlarChainCode) Init(stub shim.ChaincodeStubInterface) pb.Response {
@@ -59,8 +73,13 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 		fmt.Println("Invalid argument expected protocol buffer")
 		return shim.Error("Invalid argument expected protocol buffer")
 	}
+	fmt.Println("********************** debug chaincode")
 	fmt.Println(function)
 	fmt.Println(argsProof)
+
+	chaincodeEvent := kevlarChainCodeEvent{Function: function, Proof: argsProof, SecpProof: nil, SecpShaProof: nil}
+
+	//fmt.Printf("ok", chaincodeEvent)
 
 	switch function {
 
@@ -97,6 +116,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 				fmt.Printf("Error Saving Proof to Data %s\n", err)
 				return shim.Error(fmt.Sprintf("Error Saving Proof to Data %s", err))
 			}
+			chaincodeEvent.SecpProof = newProof
 		case proofTx.ProofTX_SECP256K1SHA2:
 			fmt.Println("Creating Sha2 Proof")
 			newProof := ElementProof.SecP256k1SHA2ElementProof{}
@@ -129,6 +149,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 				fmt.Printf("Error Saving Proof to Data %s\n", err)
 				return shim.Error(fmt.Sprintf("Error Saving Proof to Data %s", err))
 			}
+			chaincodeEvent.SecpShaProof = &newProof
 		default:
 			fmt.Println("Invalid Proof Type")
 			return shim.Error("Invalid Proof Type")
@@ -136,7 +157,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 
 		//Verify that these are publicKeys
 
-		return shim.Success(nil)
+		//return shim.Success(nil)
 
 	case "signProof":
 		proofBytes, err := stub.GetState("Proof:" + argsProof.Name)
@@ -176,7 +197,10 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 			stub.PutState("Proof:"+secpShaProof.Name(), proofBytes)
 		}
 
-		return shim.Success(nil)
+		chaincodeEvent.SecpProof = secpProof
+		chaincodeEvent.SecpShaProof = secpShaProof
+
+		//return shim.Success(nil)
 
 	case "revokeProof":
 		proofBytes, err := stub.GetState("Proof:" + argsProof.Name)
@@ -209,7 +233,11 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 			proofBytes = secpShaProof.ToBytes()
 			stub.PutState("Proof:"+secpShaProof.Name(), proofBytes)
 		}
-		return shim.Success(nil)
+
+		chaincodeEvent.SecpProof = secpProof
+		chaincodeEvent.SecpShaProof = secpShaProof
+
+		//return shim.Success(nil)
 
 	case "supercedeProof":
 
@@ -226,6 +254,7 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 		}
 		secpProof := new(ElementProof.SecP256k1ElementProof)
 		secpShaProof := new(ElementProof.SecP256k1SHA2ElementProof)
+
 		supercededBits, err := proto.Marshal(argsProof.GetSupercede())
 		supercedeDigest := sha256.Sum256(supercededBits)
 		digestHex := hex.EncodeToString(supercedeDigest[:])
@@ -317,12 +346,36 @@ func (t *kevlarChainCode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 			return shim.Error(fmt.Sprintf("Error Saving Proof to Data %s", err))
 		}
 
-		return shim.Success(nil)
+		chaincodeEvent.SecpProof = secpProof
+		chaincodeEvent.SecpShaProof = secpShaProof
+
+		//return shim.Success(nil)
 
 	default:
 		fmt.Println("Invalid function type")
 		return shim.Error("Received unknown function invocation")
 	}
+
+	jsonEvent, err2 := json.Marshal(struct {
+		Event *kevlarChainCodeEvent `json: Event`
+		Type  string                `json: Type`
+	}{Event: &chaincodeEvent, Type: function})
+
+	if err2 != nil {
+		fmt.Printf(err2.Error())
+	}
+
+	fmt.Println("********************** stub.SetEvent")
+	//fmt.Printf("kevlarChainCodeEvent: %v\n", chaincodeEvent)
+	//fmt.Printf("jsonEvent: %v\n", jsonEvent)
+
+	s1, _ := prettyprint(jsonEvent)
+	fmt.Printf("%s\n", s1)
+
+	stub.SetEvent("txJSONKevlar", jsonEvent)
+
+	return shim.Success(nil)
+
 }
 
 //  query of a chaincode
@@ -356,6 +409,7 @@ func (t *kevlarChainCode) query(stub shim.ChaincodeStubInterface, args []string)
 
 func main() {
 	err := shim.Start(new(kevlarChainCode))
+
 	if err != nil {
 		fmt.Printf("Error starting chaincode: %s\n", err)
 	}
