@@ -22,6 +22,8 @@ import (
 
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/golang/protobuf/proto"
+	"github.com/skuchain/kevlar/ProofElements"
+	"github.com/skuchain/kevlar/ProofTx"
 )
 
 // This chaincode implements the ledger operations for the proofchaincode
